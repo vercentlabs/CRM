@@ -21,9 +21,11 @@ router.get('/', authenticateToken, getLeadMessages);
 /**
  * @route   PUT /api/lead-messages/:id/status
  * @desc    Update lead message delivery status
- * @access  Public (for webhook use)
+ * @access  Private
+ * Previously unauthenticated, which let anyone rewrite any message's status.
+ * No external webhook calls this route; the web client already sends a token.
  */
-router.put('/:id/status', updateLeadMessageStatus);
+router.put('/:id/status', authenticateToken, updateLeadMessageStatus);
 
 /**
  * @route   POST /api/lead-messages/bulk

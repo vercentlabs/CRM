@@ -13,13 +13,18 @@ dist/
 build/
 .expo/
 web-build/
+.turbo/
+coverage/
 *.tsbuildinfo
 
 # Python virtualenv (not used by the project)
 .venv/
 
-# Logs and OS files
+# Logs, editors and OS files
 *.log
 npm-debug.log*
+.pnpm-debug.log*
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db

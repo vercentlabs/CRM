@@ -32,8 +32,15 @@ const fetchGoldRate = async () => {
     return cachedResponse;
   }
   try {
-    // Using the Alpha Vantage API for physical gold prices
-    const apiResponse = await axios.get('https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=XAUUSD&apikey=YKEW3KGIXUWJEQ16', { timeout: 5000 });
+    // Using the Alpha Vantage API for physical gold prices.
+    // The key comes from GOLD_API_KEY (it was previously hard-coded in source).
+    if (!process.env.GOLD_API_KEY) {
+      throw new Error('GOLD_API_KEY is not configured');
+    }
+    const apiResponse = await axios.get('https://www.alphavantage.co/query', {
+      params: { function: 'GLOBAL_QUOTE', symbol: 'XAUUSD', apikey: process.env.GOLD_API_KEY },
+      timeout: 5000
+    });
 
     // Extract the data from the API response
     const { data } = apiResponse;

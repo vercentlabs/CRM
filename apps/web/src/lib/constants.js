@@ -1,7 +1,9 @@
-// Role Constants - Single source of truth for role IDs
-export const ROLE_ADMIN = 1;
-export const ROLE_MANAGER = 2;
-export const ROLE_SALES = 3;
+import { LEGACY_ROLE_IDS } from '@crm/permissions';
+
+// Role Constants - role IDs come from the shared @crm/permissions package
+export const ROLE_ADMIN = LEGACY_ROLE_IDS.ADMIN;
+export const ROLE_MANAGER = LEGACY_ROLE_IDS.MANAGER;
+export const ROLE_SALES = LEGACY_ROLE_IDS.SALES;
 
 // Role Names for display
 export const ROLE_NAMES = {

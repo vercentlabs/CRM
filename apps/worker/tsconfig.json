@@ -1,0 +1,10 @@
+{
+  "extends": "@crm/config/tsconfig/node.json",
+  "compilerOptions": {
+    "declaration": false,
+    "declarationMap": false,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,25 @@
+packages:
+  - apps/*
+  - packages/*
+allowBuilds:
+  bcrypt: true
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+minimumReleaseAgeExclude:
+  - '@turbo/darwin-64@2.11.5'
+  - '@turbo/darwin-arm64@2.11.5'
+  - '@turbo/linux-64@2.11.5'
+  - '@turbo/linux-arm64@2.11.5'
+  - '@turbo/windows-64@2.11.5'
+  - '@turbo/windows-arm64@2.11.5'
+  - turbo@2.11.5
+# Phase 1 lock preservation: keep the exact versions the pre-monorepo npm/pnpm
+# lockfiles resolved, so the package-manager switch does not silently upgrade
+# anything. Remove an entry only as a deliberate, tested upgrade.
+overrides:
+  axios: 1.13.2
+  dotenv: 17.2.3
+  eslint: 9.39.2
+  '@expo/vector-icons': 15.0.3
+  eslint-plugin-react-hooks: 7.0.1

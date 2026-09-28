@@ -1,18 +1,25 @@
 {
-  "name": "crm-backend",
+  "name": "@crm/api",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
-  "main": "src/server.js",
+  "main": "dist/server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "nodemon src/server.js",
-    "migrate": "node src/scripts/run-migration.js"
+    "dev": "tsx watch src/server.js",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "CRM REST API (Express modular monolith)",
   "dependencies": {
+    "@crm/config": "workspace:*",
+    "@crm/database": "workspace:*",
+    "@crm/types": "workspace:*",
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
@@ -22,11 +29,15 @@
     "jsonwebtoken": "^9.0.3",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.9.7",
-    "pg": "^8.16.3",
     "plivo": "^4.0.0",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.19.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.2"
   }
 }

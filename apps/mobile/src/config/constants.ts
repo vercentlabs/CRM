@@ -1,3 +1,4 @@
+import { LEGACY_ROLE_IDS } from '@crm/permissions';
 import { NativeModules, Platform } from 'react-native';
 
 const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, '');
@@ -24,7 +25,7 @@ const resolveBaseUrl = () => {
 
 export const API_BASE_URL = resolveBaseUrl();
 
-// Role constants (must match backend)
-export const ROLE_ADMIN = 1;
-export const ROLE_MANAGER = 2;
-export const ROLE_SALES = 3;
+// Role constants come from the shared @crm/permissions package (must match backend)
+export const ROLE_ADMIN = LEGACY_ROLE_IDS.ADMIN;
+export const ROLE_MANAGER = LEGACY_ROLE_IDS.MANAGER;
+export const ROLE_SALES = LEGACY_ROLE_IDS.SALES;

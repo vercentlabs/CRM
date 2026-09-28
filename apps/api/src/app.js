@@ -24,8 +24,18 @@ import chatRoutes from './routes/chat.routes.js';
 import leadMessageRoutes from './routes/lead-message.routes.js';
 import settingsRoutes from './routes/settings.routes.js';
 import uploadRoutes from './routes/upload.routes.js';
+import pool from './config/db.js';
+import { requestContextMiddleware } from './platform/request-context.js';
+import { createV1Router } from './platform/v1.js';
+import { errorHandler } from './platform/http/error-handler.js';
 
 const app = express();
+
+// Do not advertise the framework in response headers
+app.disable('x-powered-by');
+
+// Request ID + async request context (must run first)
+app.use(requestContextMiddleware);
 
 // Enable JSON body parsing
 app.use(express.json());
@@ -33,8 +43,11 @@ app.use(express.json());
 // Enable CORS
 app.use(cors());
 
-// Health check route
+// Health check route (legacy, unversioned)
 app.use('/health', healthRoutes);
+
+// Versioned API (see docs/architecture/TARGET_SYSTEM.md)
+app.use('/api/v1', createV1Router({ pool }));
 
 // Authentication routes
 app.use('/auth', authRoutes);
@@ -99,5 +112,8 @@ app.use('/settings', settingsRoutes);
 
 // Upload routes
 app.use('/api/upload', uploadRoutes);
+
+// Central error handler: safe JSON errors, no stack traces, request ID attached
+app.use(errorHandler);
 
 export default app;

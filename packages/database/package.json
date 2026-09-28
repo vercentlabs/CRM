@@ -1,0 +1,39 @@
+{
+  "name": "@crm/database",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PostgreSQL connection, health checks and forward-only migrations",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "migrations"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "migrate": "node dist/cli/migrate.js up",
+    "migrate:status": "node dist/cli/migrate.js status",
+    "migrate:baseline": "node dist/cli/migrate.js baseline"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@crm/config": "workspace:*",
+    "@types/node": "^22.19.0",
+    "@types/pg": "^8.23.1",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.2"
+  }
+}

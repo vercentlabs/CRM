@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { setContextUser } from '../platform/request-context.js';
 
 /**
  * Authentication middleware that verifies JWT tokens
@@ -29,6 +30,9 @@ const authenticateToken = (req, res, next) => {
       userId: decoded.userId,
       roleId: decoded.roleId
     };
+
+    // Expose the identity to the async request context (logging, future tenancy)
+    setContextUser(req.user);
 
     // Call the next middleware
     next();

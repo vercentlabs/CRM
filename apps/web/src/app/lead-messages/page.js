@@ -25,7 +25,7 @@ const LeadMessagesPage = () => {
   const handleSendMessage = useCallback(async (data) => {
     await sendMessage(data);
     setShowForm(false);
-  }, []);
+  }, [sendMessage]);
 
   const handleViewLead = useCallback((lead) => {
     setSelectedLead(lead);

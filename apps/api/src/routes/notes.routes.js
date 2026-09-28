@@ -1,42 +1,23 @@
-
 import express from 'express';
 const router = express.Router();
 import { getNotes, getNoteById, createNote, updateNote, deleteNote } from '../controllers/notes.controller.js';
-import authenticateToken from '../middleware/auth.middleware.js';
+import authenticateToken, { requirePermission } from '../middleware/auth.middleware.js';
 
-/**
- * @route   GET /notes
- * @desc    Get notes based on user role
- * @access  Private
- */
-router.get('/', authenticateToken, getNotes);
+router.use(authenticateToken);
 
-/**
- * @route   GET /notes/:id
- * @desc    Get a single note by ID
- * @access  Private
- */
-router.get('/:id', authenticateToken, getNoteById);
+/** @route GET /notes */
+router.get('/', requirePermission('crm.notes.read'), getNotes);
 
-/**
- * @route   POST /notes
- * @desc    Create a new note
- * @access  Private
- */
-router.post('/', authenticateToken, createNote);
+/** @route GET /notes/:id */
+router.get('/:id', requirePermission('crm.notes.read'), getNoteById);
 
-/**
- * @route   PUT /notes/:id
- * @desc    Update a note
- * @access  Private
- */
-router.put('/:id', authenticateToken, updateNote);
+/** @route POST /notes */
+router.post('/', requirePermission('crm.notes.create'), createNote);
 
-/**
- * @route   DELETE /notes/:id
- * @desc    Delete a note (soft delete)
- * @access  Private
- */
-router.delete('/:id', authenticateToken, deleteNote);
+/** @route PUT /notes/:id */
+router.put('/:id', requirePermission('crm.notes.update'), updateNote);
+
+/** @route DELETE /notes/:id */
+router.delete('/:id', requirePermission('crm.notes.delete'), deleteNote);
 
 export default router;

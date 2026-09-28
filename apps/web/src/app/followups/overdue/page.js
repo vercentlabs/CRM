@@ -38,7 +38,7 @@ const OverdueFollowupsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     if (token) {

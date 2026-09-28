@@ -1,12 +1,13 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { apiRequest, setUnauthorizedHandler } from '../services/api';
+import { apiRequest, refreshSession, setUnauthorizedHandler } from '../services/api';
 import {
   clearStoredAuth,
+  getRefreshToken,
   getStoredUser,
-  getToken,
-  setStoredUser,
-  setToken as persistToken
+  purgeLegacyToken,
+  setSessionTokens,
+  setStoredUser
 } from '../services/authStorage';
 import { getApiBaseUrl, subscribeApiBaseUrl } from '../services/apiBase';
 import { ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES } from '../config/constants';
@@ -19,7 +20,6 @@ type LoginResult = {
 
 type AuthContextValue = {
   user: AuthUser | null;
-  token: string | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<LoginResult>;
   logout: () => Promise<void>;
@@ -29,64 +29,54 @@ type AuthContextValue = {
   isManager: () => boolean;
   isSales: () => boolean;
   isManagerOrHigher: () => boolean;
+  hasPermission: (permission: string) => boolean;
+};
+
+/** Shape of /api/v1/auth/* responses for mobile clients (see @crm/types AuthSessionView). */
+type SessionPayload = {
+  user: { id: number; email: string; roleId: number | null; name: string };
+  organization: { id: string; name: string; slug: string };
+  membership: { role: { key: string; name: string } };
+  permissions: Record<string, string>;
+  accessToken?: string;
+  refreshToken?: string;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const normalizeUser = (raw: {
-  id: number;
-  email: string;
-  roleId?: number;
-  role_id?: number;
-  full_name?: string | null;
-  username?: string | null;
-  name?: string | null;
-}): AuthUser => {
-  return {
-    id: raw.id,
-    email: raw.email,
-    roleId: raw.roleId ?? raw.role_id ?? ROLE_SALES,
-    name: raw.full_name || raw.username || raw.name || raw.email
-  };
-};
+const toAuthUser = (session: SessionPayload): AuthUser => ({
+  id: session.user.id,
+  email: session.user.email,
+  // DEPRECATED legacy id used only for existing role-based navigation; custom roles
+  // fall back to the least-privileged UI (the API enforces real permissions).
+  roleId: session.user.roleId ?? ROLE_SALES,
+  name: session.user.name || session.user.email,
+  organization: session.organization,
+  role: session.membership?.role,
+  permissions: session.permissions
+});
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refreshUser = async () => {
-    const activeToken = token ?? (await getToken());
-    if (!activeToken) return;
+  const refreshUser = useCallback(async () => {
     try {
-      const response = await apiRequest<{
-        success: boolean;
-        user: {
-          id: number;
-          full_name?: string | null;
-          email: string;
-          username?: string | null;
-          roleId?: number;
-          role_id?: number;
-        };
-      }>('/users/me');
-
-      if (response?.user) {
-        const normalized = normalizeUser(response.user);
+      const session = await apiRequest<SessionPayload>('/api/v1/auth/session');
+      if (session?.user) {
+        const normalized = toAuthUser(session);
         setUser(normalized);
         await setStoredUser(normalized);
       }
-    } catch (error) {
-      // If refreshing fails, keep existing user but allow the app to proceed
-      // Unauthorized errors will be handled by the global handler
+    } catch {
+      // Keep the cached user; unauthorized errors are handled globally.
     }
-  };
+  }, []);
 
-  const handleUnauthorized = async () => {
+  const handleUnauthorized = useCallback(async () => {
     await clearStoredAuth();
     setUser(null);
-    setToken(null);
-  };
+  }, []);
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
@@ -96,28 +86,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => {
       setUnauthorizedHandler(null);
     };
-  }, []);
+  }, [handleUnauthorized]);
+
+  /** Restores the session for a base URL using the SecureStore refresh token. */
+  const restoreSession = useCallback(
+    async (baseUrl: string) => {
+      await purgeLegacyToken(baseUrl);
+      const [storedUser, refreshToken] = await Promise.all([getStoredUser(baseUrl), getRefreshToken(baseUrl)]);
+      if (!refreshToken) {
+        setUser(null);
+        return;
+      }
+      setUser(storedUser);
+      if (await refreshSession()) {
+        await refreshUser();
+      } else {
+        await clearStoredAuth(baseUrl);
+        setUser(null);
+      }
+    },
+    [refreshUser]
+  );
 
   useEffect(() => {
     let mounted = true;
 
     const initializeAuth = async () => {
       try {
-        const [storedToken, storedUser] = await Promise.all([getToken(), getStoredUser()]);
-
-        if (!mounted) return;
-
-        if (storedToken) {
-          setToken(storedToken);
-        }
-
-        if (storedUser) {
-          setUser(storedUser);
-        }
-
-        if (storedToken) {
-          await refreshUser();
-        }
+        await restoreSession(await getApiBaseUrl());
       } finally {
         if (mounted) {
           setLoading(false);
@@ -130,59 +126,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [restoreSession]);
 
   useEffect(() => {
     const unsubscribe = subscribeApiBaseUrl((baseUrl) => {
-      const syncAuth = async () => {
-        const [storedToken, storedUser] = await Promise.all([
-          getToken(baseUrl),
-          getStoredUser(baseUrl)
-        ]);
-
-        setToken(storedToken);
-        setUser(storedUser);
-
-        if (storedToken) {
-          await refreshUser();
-        }
-      };
-
-      void syncAuth();
+      void restoreSession(baseUrl);
     });
 
     return () => {
       unsubscribe();
     };
-  }, [refreshUser]);
+  }, [restoreSession]);
 
   const login = async (email: string, password: string): Promise<LoginResult> => {
     try {
       const baseUrl = await getApiBaseUrl();
-      const data = await apiRequest<{
-        token: string;
-        user: {
-          id: number;
-          email: string;
-          roleId?: number;
-          role_id?: number;
-          name?: string | null;
-          full_name?: string | null;
-          username?: string | null;
-        };
-      }>('/auth/login', {
+      const session = await apiRequest<SessionPayload>('/api/v1/auth/login', {
         method: 'POST',
-        body: { email, password }
+        body: { email, password, client: 'mobile' },
+        skipAuthRefresh: true
       });
 
-      if (!data?.token || !data.user) {
+      if (!session?.accessToken || !session.refreshToken || !session.user) {
         return { success: false, error: 'Invalid login response.' };
       }
 
-      const normalized = normalizeUser(data.user);
-      await persistToken(data.token, baseUrl);
+      const normalized = toAuthUser(session);
+      await setSessionTokens({ accessToken: session.accessToken, refreshToken: session.refreshToken }, baseUrl);
       await setStoredUser(normalized, baseUrl);
-      setToken(data.token);
       setUser(normalized);
 
       return { success: true };
@@ -194,28 +165,41 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  /** Revokes the server session (works even if the access token already expired). */
   const logout = async () => {
-    await clearStoredAuth();
-    setUser(null);
-    setToken(null);
+    try {
+      const refreshToken = await getRefreshToken();
+      await apiRequest('/api/v1/auth/logout', {
+        method: 'POST',
+        body: refreshToken ? { refreshToken } : {},
+        skipAuthRefresh: true
+      });
+    } catch {
+      // Clear locally regardless; the server session also expires on its own.
+    } finally {
+      await clearStoredAuth();
+      setUser(null);
+    }
   };
 
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
-      token,
       loading,
       login,
       logout,
       refreshUser,
-      isAuthenticated: Boolean(user && token),
+      isAuthenticated: Boolean(user),
       isAdmin: () => user?.roleId === ROLE_ADMIN,
       isManager: () => user?.roleId === ROLE_MANAGER,
       isSales: () => user?.roleId === ROLE_SALES,
       isManagerOrHigher: () =>
-        user?.roleId === ROLE_ADMIN || user?.roleId === ROLE_MANAGER
+        user?.roleId === ROLE_ADMIN || user?.roleId === ROLE_MANAGER,
+      hasPermission: (permission: string) => Boolean(user?.permissions?.[permission])
     }),
-    [user, token, loading]
+    // login/logout are recreated per render but only close over stable setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [user, loading, refreshUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

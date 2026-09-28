@@ -9,7 +9,11 @@ const defaults: Record<string, string> = {
   IMAGEKIT_PRIVATE_KEY: 'test',
   IMAGEKIT_URL_ENDPOINT: 'https://ik.imagekit.io/test',
   PLIVO_AUTH_ID: 'test',
-  PLIVO_AUTH_TOKEN: 'test',
+  PLIVO_AUTH_TOKEN: 'test-plivo-auth-token',
+  PLIVO_WEBHOOK_URL: 'https://api.example.test/api/plivo/webhook',
+  // Integration suites log in many times; the limiter itself is unit-tested separately.
+  AUTH_RATE_LIMIT_MAX: '1000',
+  CORS_ORIGINS: 'http://web.example.test',
 };
 
 for (const [key, value] of Object.entries(defaults)) {

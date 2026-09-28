@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useLeadMessages } from '@/context/LeadMessageContext';
 
 /**
@@ -10,7 +10,6 @@ import { useLeadMessages } from '@/context/LeadMessageContext';
  */
 const LeadMessageHistory = ({ leadId, leadName }) => {
   const { messages, loading, error, fetchMessages } = useLeadMessages();
-  const [filteredMessages, setFilteredMessages] = useState([]);
 
   useEffect(() => {
     if (leadId) {
@@ -18,14 +17,11 @@ const LeadMessageHistory = ({ leadId, leadName }) => {
     }
   }, [leadId, fetchMessages]);
 
-  useEffect(() => {
-    if (leadId) {
-      const filtered = messages.filter(msg => msg.lead_id === leadId);
-      setFilteredMessages(filtered);
-    } else {
-      setFilteredMessages(messages);
-    }
-  }, [messages, leadId]);
+  // Derived from context state (no extra render pass)
+  const filteredMessages = useMemo(
+    () => (leadId ? messages.filter(msg => msg.lead_id === leadId) : messages),
+    [messages, leadId]
+  );
 
   const getStatusColor = (status) => {
     switch (status.toLowerCase()) {

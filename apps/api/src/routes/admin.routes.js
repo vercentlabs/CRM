@@ -1,14 +1,10 @@
 import express from 'express';
-const router = express.Router();
-import authenticateToken from '../middleware/auth.middleware.js';
-import { checkRoles } from '../middleware/roleCheck.js';
+import authenticateToken, { requirePermission } from '../middleware/auth.middleware.js';
 
-/**
- * @route   GET /admin/dashboard
- * @desc    Admin dashboard route that requires authentication and admin role
- * @access  Private (Admin only)
- */
-router.get('/dashboard', authenticateToken, checkRoles([1]), (req, res) => {
+const router = express.Router();
+
+/** @route GET /admin/dashboard (organization administrators) */
+router.get('/dashboard', authenticateToken, requirePermission('settings.organization.manage'), (req, res) => {
   res.json({
     message: 'Admin access granted'
   });

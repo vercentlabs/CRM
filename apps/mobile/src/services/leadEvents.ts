@@ -4,7 +4,9 @@ const leadRefreshListeners = new Set<LeadRefreshListener>();
 
 export const onLeadsRefresh = (listener: LeadRefreshListener) => {
   leadRefreshListeners.add(listener);
-  return () => leadRefreshListeners.delete(listener);
+  return () => {
+    leadRefreshListeners.delete(listener);
+  };
 };
 
 export const emitLeadsRefresh = () => {

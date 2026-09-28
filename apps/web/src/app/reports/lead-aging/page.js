@@ -21,11 +21,7 @@ const LeadAgingReport = () => {
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        const response = await axios.get('/users?role=2,3', { // Get Managers and Sales users
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
+        const response = await axios.get('/users?role=2,3');
 
         setUsers(response.data.data || []);
       } catch (err) {
@@ -52,11 +48,7 @@ const LeadAgingReport = () => {
           queryParams.append('userId', selectedUser);
         }
 
-        const response = await axios.get(`/reports/lead-aging?${queryParams.toString()}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
+        const response = await axios.get(`/reports/lead-aging?${queryParams.toString()}`);
 
         setReportData(response.data.data || []);
       } catch (err) {

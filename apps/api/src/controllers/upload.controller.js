@@ -1,10 +1,11 @@
 import { uploadFile } from '../services/upload.service.js';
+import { serverError } from '../platform/tenancy.js';
 
 /**
  * Upload file to ImageKit
  * @route   POST /api/upload/chat-attachment
  * @desc    Upload a file for chat attachment
- * @access  Private
+ * @access  crm.chat.use. Files are stored under the organization's own folder.
  */
 export const uploadChatAttachment = async (req, res) => {
   try {
@@ -22,18 +23,15 @@ export const uploadChatAttachment = async (req, res) => {
       });
     }
 
-    // Upload file to ImageKit
-    const uploadResult = await uploadFile(req.file, 'chat/attachments');
+    // Tenant-partitioned storage path (public UUID, never the numeric id)
+    const folder = `organizations/${req.auth.organizationPublicId}/chat/attachments`;
+    const uploadResult = await uploadFile(req.file, folder);
 
     res.status(200).json({
       message: 'File uploaded successfully',
       data: uploadResult
     });
   } catch (error) {
-    console.error('Error uploading chat attachment:', error);
-    res.status(500).json({
-      message: 'Failed to upload file',
-      error: error.message
-    });
+    return serverError(res, 'Failed to upload file', error);
   }
 };

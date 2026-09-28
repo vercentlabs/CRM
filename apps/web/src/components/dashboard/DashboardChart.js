@@ -26,6 +26,168 @@ const LineIcon = () => (
   </svg>
 );
 
+// Pure canvas renderers (module scope so the effect below can use them safely)
+// Render funnel chart
+const renderFunnelChart = (ctx, width, height, data) => {
+  // Colors for different segments
+  const colors = ['#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe'];
+
+  // Calculate total for percentages
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+
+  // Calculate dimensions for each segment
+  const segmentHeight = height / (data.length * 1.5);
+  const maxWidth = width * 0.8;
+  const minWidth = width * 0.4;
+
+  // Draw funnel segments
+  let y = 20;
+  data.forEach((item, index) => {
+    const percentage = total > 0 ? item.value / total : 0;
+    const segmentWidth = minWidth + (maxWidth - minWidth) * (1 - percentage);
+
+    // Draw segment
+    ctx.fillStyle = colors[index % colors.length];
+    ctx.beginPath();
+    ctx.moveTo((width - segmentWidth) / 2, y);
+    ctx.lineTo((width + segmentWidth) / 2, y);
+    ctx.lineTo((width + maxWidth) / 2, y + segmentHeight);
+    ctx.lineTo((width - maxWidth) / 2, y + segmentHeight);
+    ctx.closePath();
+    ctx.fill();
+
+    // Draw label
+    ctx.fillStyle = '#1f2937';
+    ctx.font = '12px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(item.label, width / 2, y + segmentHeight / 2);
+    ctx.fillText(`${item.value} (${(percentage * 100).toFixed(1)}%)`, width / 2, y + segmentHeight / 2 + 15);
+
+    y += segmentHeight * 1.2;
+  });
+};
+
+// Render donut chart
+const renderDonutChart = (ctx, width, height, data) => {
+  // Colors for different segments
+  const colors = ['#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe'];
+
+  // Calculate total for percentages
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+
+  // Chart dimensions
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const radius = Math.min(width, height) * 0.35;
+  const innerRadius = radius * 0.6;
+
+  // Draw donut segments
+  let currentAngle = -Math.PI / 2; // Start at top
+  data.forEach((item, index) => {
+    const percentage = total > 0 ? item.value / total : 0;
+    const segmentAngle = percentage * Math.PI * 2;
+
+    // Draw segment
+    ctx.fillStyle = colors[index % colors.length];
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, currentAngle, currentAngle + segmentAngle);
+    ctx.arc(centerX, centerY, innerRadius, currentAngle + segmentAngle, currentAngle, true);
+    ctx.closePath();
+    ctx.fill();
+
+    // Draw label
+    const labelAngle = currentAngle + segmentAngle / 2;
+    const labelX = centerX + Math.cos(labelAngle) * (radius * 1.3);
+    const labelY = centerY + Math.sin(labelAngle) * (radius * 1.3);
+
+    ctx.fillStyle = '#1f2937';
+    ctx.font = '12px Inter, sans-serif';
+    ctx.textAlign = labelX > centerX ? 'left' : 'right';
+    ctx.fillText(item.label, labelX, labelY);
+    ctx.fillText(`${item.value} (${(percentage * 100).toFixed(1)}%)`, labelX, labelY + 15);
+
+    currentAngle += segmentAngle;
+  });
+};
+
+// Render line chart
+const renderLineChart = (ctx, width, height, data) => {
+  // Chart dimensions
+  const padding = 40;
+  const chartWidth = width - padding * 2;
+  const chartHeight = height - padding * 2;
+
+  // Find min and max values
+  const values = data.map(item => item.value);
+  const maxValue = Math.max(...values, 1);
+  const minValue = 0;
+
+  // Draw axes
+  ctx.strokeStyle = '#e5e7eb';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padding, padding);
+  ctx.lineTo(padding, height - padding);
+  ctx.lineTo(width - padding, height - padding);
+  ctx.stroke();
+
+  // Draw grid lines
+  ctx.strokeStyle = '#f3f4f6';
+  for (let i = 0; i <= 5; i++) {
+    const y = padding + (chartHeight / 5) * i;
+    ctx.beginPath();
+    ctx.moveTo(padding, y);
+    ctx.lineTo(width - padding, y);
+    ctx.stroke();
+
+    // Y-axis labels
+    const value = maxValue - (maxValue / 5) * i;
+    ctx.fillStyle = '#6b7280';
+    ctx.font = '12px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(value.toFixed(0), padding - 10, y + 4);
+  }
+
+  // Draw data points and lines
+  const pointSpacing = chartWidth / (data.length - 1 || 1);
+
+  ctx.strokeStyle = '#4f46e5';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+
+  data.forEach((item, index) => {
+    const x = padding + pointSpacing * index;
+    const y = height - padding - ((item.value - minValue) / (maxValue - minValue)) * chartHeight;
+
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+
+  ctx.stroke();
+
+  // Draw data points
+  data.forEach((item, index) => {
+    const x = padding + pointSpacing * index;
+    const y = height - padding - ((item.value - minValue) / (maxValue - minValue)) * chartHeight;
+
+    // Draw point
+    ctx.fillStyle = '#4f46e5';
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw label
+    ctx.fillStyle = '#6b7280';
+    ctx.font = '12px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(item.label, x, height - padding + 20);
+  });
+};
+
+
 const DashboardChart = ({ title, type, data }) => {
   const canvasRef = useRef(null);
   const [chartInstance, setChartInstance] = useState(null);
@@ -54,166 +216,6 @@ const DashboardChart = ({ title, type, data }) => {
       renderLineChart(ctx, canvas.width, canvas.height, data);
     }
   }, [data, type]);
-
-  // Render funnel chart
-  const renderFunnelChart = (ctx, width, height, data) => {
-    // Colors for different segments
-    const colors = ['#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe'];
-
-    // Calculate total for percentages
-    const total = data.reduce((sum, item) => sum + item.value, 0);
-
-    // Calculate dimensions for each segment
-    const segmentHeight = height / (data.length * 1.5);
-    const maxWidth = width * 0.8;
-    const minWidth = width * 0.4;
-
-    // Draw funnel segments
-    let y = 20;
-    data.forEach((item, index) => {
-      const percentage = total > 0 ? item.value / total : 0;
-      const segmentWidth = minWidth + (maxWidth - minWidth) * (1 - percentage);
-
-      // Draw segment
-      ctx.fillStyle = colors[index % colors.length];
-      ctx.beginPath();
-      ctx.moveTo((width - segmentWidth) / 2, y);
-      ctx.lineTo((width + segmentWidth) / 2, y);
-      ctx.lineTo((width + maxWidth) / 2, y + segmentHeight);
-      ctx.lineTo((width - maxWidth) / 2, y + segmentHeight);
-      ctx.closePath();
-      ctx.fill();
-
-      // Draw label
-      ctx.fillStyle = '#1f2937';
-      ctx.font = '12px Inter, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(item.label, width / 2, y + segmentHeight / 2);
-      ctx.fillText(`${item.value} (${(percentage * 100).toFixed(1)}%)`, width / 2, y + segmentHeight / 2 + 15);
-
-      y += segmentHeight * 1.2;
-    });
-  };
-
-  // Render donut chart
-  const renderDonutChart = (ctx, width, height, data) => {
-    // Colors for different segments
-    const colors = ['#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe'];
-
-    // Calculate total for percentages
-    const total = data.reduce((sum, item) => sum + item.value, 0);
-
-    // Chart dimensions
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const radius = Math.min(width, height) * 0.35;
-    const innerRadius = radius * 0.6;
-
-    // Draw donut segments
-    let currentAngle = -Math.PI / 2; // Start at top
-    data.forEach((item, index) => {
-      const percentage = total > 0 ? item.value / total : 0;
-      const segmentAngle = percentage * Math.PI * 2;
-
-      // Draw segment
-      ctx.fillStyle = colors[index % colors.length];
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, radius, currentAngle, currentAngle + segmentAngle);
-      ctx.arc(centerX, centerY, innerRadius, currentAngle + segmentAngle, currentAngle, true);
-      ctx.closePath();
-      ctx.fill();
-
-      // Draw label
-      const labelAngle = currentAngle + segmentAngle / 2;
-      const labelX = centerX + Math.cos(labelAngle) * (radius * 1.3);
-      const labelY = centerY + Math.sin(labelAngle) * (radius * 1.3);
-
-      ctx.fillStyle = '#1f2937';
-      ctx.font = '12px Inter, sans-serif';
-      ctx.textAlign = labelX > centerX ? 'left' : 'right';
-      ctx.fillText(item.label, labelX, labelY);
-      ctx.fillText(`${item.value} (${(percentage * 100).toFixed(1)}%)`, labelX, labelY + 15);
-
-      currentAngle += segmentAngle;
-    });
-  };
-
-  // Render line chart
-  const renderLineChart = (ctx, width, height, data) => {
-    // Chart dimensions
-    const padding = 40;
-    const chartWidth = width - padding * 2;
-    const chartHeight = height - padding * 2;
-
-    // Find min and max values
-    const values = data.map(item => item.value);
-    const maxValue = Math.max(...values, 1);
-    const minValue = 0;
-
-    // Draw axes
-    ctx.strokeStyle = '#e5e7eb';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(padding, padding);
-    ctx.lineTo(padding, height - padding);
-    ctx.lineTo(width - padding, height - padding);
-    ctx.stroke();
-
-    // Draw grid lines
-    ctx.strokeStyle = '#f3f4f6';
-    for (let i = 0; i <= 5; i++) {
-      const y = padding + (chartHeight / 5) * i;
-      ctx.beginPath();
-      ctx.moveTo(padding, y);
-      ctx.lineTo(width - padding, y);
-      ctx.stroke();
-
-      // Y-axis labels
-      const value = maxValue - (maxValue / 5) * i;
-      ctx.fillStyle = '#6b7280';
-      ctx.font = '12px Inter, sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText(value.toFixed(0), padding - 10, y + 4);
-    }
-
-    // Draw data points and lines
-    const pointSpacing = chartWidth / (data.length - 1 || 1);
-
-    ctx.strokeStyle = '#4f46e5';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-
-    data.forEach((item, index) => {
-      const x = padding + pointSpacing * index;
-      const y = height - padding - ((item.value - minValue) / (maxValue - minValue)) * chartHeight;
-
-      if (index === 0) {
-        ctx.moveTo(x, y);
-      } else {
-        ctx.lineTo(x, y);
-      }
-    });
-
-    ctx.stroke();
-
-    // Draw data points
-    data.forEach((item, index) => {
-      const x = padding + pointSpacing * index;
-      const y = height - padding - ((item.value - minValue) / (maxValue - minValue)) * chartHeight;
-
-      // Draw point
-      ctx.fillStyle = '#4f46e5';
-      ctx.beginPath();
-      ctx.arc(x, y, 4, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Draw label
-      ctx.fillStyle = '#6b7280';
-      ctx.font = '12px Inter, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(item.label, x, height - padding + 20);
-    });
-  };
 
   // Get icon based on chart type
   const getChartIcon = () => {

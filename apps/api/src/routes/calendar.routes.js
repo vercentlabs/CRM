@@ -1,35 +1,21 @@
-
 import express from 'express';
 const router = express.Router();
 import { getEvents, createEvent, updateEvent, deleteEvent } from '../controllers/calendar.controller.js';
-import authenticateToken from '../middleware/auth.middleware.js';
+import authenticateToken, { requirePermission } from '../middleware/auth.middleware.js';
 
-/**
- * @route   GET /calendar
- * @desc    Get calendar events based on user role
- * @access  Private
- */
-router.get('/', authenticateToken, getEvents);
+// Calendar events are rows in `tasks`; both surfaces share the crm.tasks.* permissions.
+router.use(authenticateToken);
 
-/**
- * @route   POST /calendar
- * @desc    Create a new calendar event
- * @access  Private
- */
-router.post('/', authenticateToken, createEvent);
+/** @route GET /calendar */
+router.get('/', requirePermission('crm.tasks.read'), getEvents);
 
-/**
- * @route   PATCH /calendar/:id
- * @desc    Update a calendar event
- * @access  Private
- */
-router.patch('/:id', authenticateToken, updateEvent);
+/** @route POST /calendar */
+router.post('/', requirePermission('crm.tasks.create'), createEvent);
 
-/**
- * @route   DELETE /calendar/:id
- * @desc    Delete a calendar event
- * @access  Private
- */
-router.delete('/:id', authenticateToken, deleteEvent);
+/** @route PATCH /calendar/:id */
+router.patch('/:id', requirePermission('crm.tasks.update'), updateEvent);
+
+/** @route DELETE /calendar/:id */
+router.delete('/:id', requirePermission('crm.tasks.delete'), deleteEvent);
 
 export default router;

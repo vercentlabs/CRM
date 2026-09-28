@@ -41,23 +41,22 @@ Clients never import `database`. `types` holds wire contracts only, never DB row
   - Throw `AppError` (`src/platform/http/errors.ts`). Anything else becomes a generic 500, and the real error is logged with the request ID. Stack traces are never returned.
   - Legacy routes keep `{ success:false, message }` (plus `requestId`) for compatibility.
 - **Request ID:** `x-request-id` is accepted if it matches `[A-Za-z0-9._:-]{8,128}`, otherwise generated. It is echoed on every response and included in error bodies and logs.
-- **Request context:** `AsyncLocalStorage` (`src/platform/request-context.ts`) carries `requestId` and `user` today. Phase 2 adds `organizationId`, `membershipId` and `permissions`.
+- **Request context:** `AsyncLocalStorage` (`src/platform/request-context.ts`) carries `requestId`, `user` and (since Phase 2) the verified `auth` context: userId, sessionId, organizationId, membershipId, roleKey and permissions.
 - **Validation:** zod schemas from `@crm/validation`, shared with clients. Issues map to `details`.
 - **OpenAPI:** generated from the zod schemas and route registry in Phase 3 and served at `/api/v1/openapi.json`. `api-client` types derive from it.
 - **Health:** `/api/v1/health/live` (process up) and `/api/v1/health/ready` (DB `SELECT 1` within 2s, not draining). They return status and latency only. Legacy `/health` is kept.
 
-## Tenancy (Phase 2)
+## Tenancy (implemented in Phase 2)
 
-- `organizations`, `memberships (user_id, organization_id, role, status)`, and invitations.
-- Every business table gets `organization_id NOT NULL` plus indexes leading with it. Unique constraints become per-organization.
-- The tenant is resolved from the authenticated membership (the JWT carries the user and the active org, verified against `memberships`), never from the request body.
-- Repositories require the org ID. Postgres RLS may be added as defence-in-depth, but the application-level filter is mandatory either way.
-- Existing data is backfilled into one default organization by a reviewed migration.
+- Tables: `organizations` (public UUID `public_id`), `organization_memberships` (`active`, `invited` or `suspended`), and `auth_sessions`. Every business table has `organization_id NOT NULL`; the details are in `TENANCY_AND_AUTH.md`.
+- The active organization is stored on the server session and bound into the access token. It is re-verified against the membership on every request and never taken from the request body.
+- Application-level filtering is mandatory: `tenantOf(req)` feeds every query. Postgres RLS remains optional defence-in-depth for a later phase.
 
-## Permissions (Phase 2)
+## Permissions (implemented in Phase 2)
 
-- Permission names come from `@crm/permissions` (`resource:action`). Roles map to permission sets per organization, and record scopes (`own`, `team`, `all`) apply per resource.
-- The server enforces permissions through `requirePermission()` middleware plus scope filters in repositories. Clients only use permissions to hide UI.
+- Permission names are `crm.<resource>.<action>` / `settings.<area>.<action>` from `@crm/permissions`. Roles are built-in templates (admin, manager, sales) plus optional organization-owned roles, and each grant carries a scope of `own` or `organization`.
+- `team` is reserved until a real teams model exists.
+- The server enforces this through `requirePermission` and `requireScope` middleware plus scope filters in queries. Clients use permissions only to hide UI.
 
 ## Database
 
@@ -66,11 +65,11 @@ Clients never import `database`. `types` holds wire contracts only, never DB row
 
 ## Web
 
-Next.js App Router, presentation only. It calls the API through `@crm/api-client` (a single client replacing the current three), uses shared zod schemas for forms, and has no DB access. The auth token moves from `localStorage` to an httpOnly cookie in Phase 2 or 5.
+Next.js App Router, presentation only. It calls the API through `@crm/api-client` (a single client replacing the current three), uses shared zod schemas for forms, and has no DB access. Auth is an HttpOnly cookie session with a CSRF header (Phase 2); JavaScript never holds tokens.
 
 ## Mobile
 
-Expo, native UI and navigation only. It uses `@crm/api-client` (lazy base URL plus an AsyncStorage/SecureStore token) and the same contracts as web. Device features (storage, documents, notifications) stay in the app.
+Expo, native UI and navigation only. It uses `@crm/api-client` (lazy base URL; short-lived access token in memory, rotating refresh token in SecureStore since Phase 2) and the same contracts as web. Device features (storage, documents, notifications) stay in the app.
 
 ## Worker, jobs and events
 

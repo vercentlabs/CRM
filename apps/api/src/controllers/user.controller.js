@@ -1,132 +1,91 @@
 import bcrypt from 'bcrypt';
-import pool from '../config/db.js';
 import crypto from 'crypto';
+import { passwordSchema } from '@crm/validation';
+import pool from '../config/db.js';
+import { revokeUserSessions } from '../platform/auth/repository.js';
+import {
+  addMember,
+  changeMemberRole,
+  getMember,
+  isExclusiveMember,
+  listMembers,
+  resolveAssignableRole,
+  setMemberStatus
+} from '../platform/organizations/members.js';
+import { parseId, serverError, tenantOf } from '../platform/tenancy.js';
+import { recordAuditEvent } from '../platform/audit.js';
+
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const GENERIC_RESET_RESPONSE = {
+  success: true,
+  message: 'If a user with that email exists, a password reset link has been sent'
+};
+
+/** Maps AppError-style failures thrown by the membership service to legacy JSON. */
+const handleMemberError = (res, error, fallback) => {
+  if (error && typeof error.status === 'number' && error.status < 500 && error.code) {
+    return res.status(error.status).json({ success: false, message: error.message });
+  }
+  return serverError(res, fallback, error);
+};
 
 /**
- * Get current user
  * @route   GET /users/me
- * @desc    Get the current user's profile
- * @access  Private
+ * @access  Authenticated member
  */
 const getCurrentUser = async (req, res) => {
   try {
-    // Get user ID from JWT token
-    const userId = req.user.userId;
-
-    // Get user from database
-    const query = `
-      SELECT id, full_name, email, username, role_id, is_active
-      FROM users
-      WHERE id = $1
-    `;
-
-    pool.query(query, [userId], (error, results) => {
-      if (error) {
-        return res.status(500).json({
-          success: false,
-          message: 'Error retrieving user',
-          error: error.message
-        });
+    const auth = req.auth;
+    const result = await pool.query('SELECT username FROM users WHERE id = $1', [auth.userId]);
+    res.status(200).json({
+      success: true,
+      user: {
+        id: auth.userId,
+        full_name: auth.name,
+        email: auth.email,
+        username: result.rows[0]?.username ?? null,
+        roleId: auth.legacyRoleId,
+        role: { key: auth.roleKey, name: auth.roleName },
+        is_active: true,
+        organization: { id: auth.organizationPublicId, name: auth.organizationName, slug: auth.organizationSlug },
+        permissions: Object.fromEntries(auth.permissions)
       }
-
-      if (results.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: 'User not found'
-        });
-      }
-
-      const user = results.rows[0];
-      res.status(200).json({
-        success: true,
-        user: {
-          id: user.id,
-          full_name: user.full_name,
-          email: user.email,
-          username: user.username,
-          roleId: user.role_id,
-          is_active: user.is_active
-        }
-      });
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
+    return serverError(res, 'Error retrieving user', error);
   }
 };
 
 /**
- * Get all users
+ * Members of the active organization (never users of other organizations)
  * @route   GET /users
- * @desc    Get all users (admin and managers only)
- * @access  Private (Admin and Manager only)
+ * @access  settings.users.read
  */
 const getAllUsers = async (req, res) => {
   try {
-    // Get role of current user from JWT token
-    const currentUserRoleId = req.user.roleId;
-    
-    // Check if current user is an admin or manager
-    if (currentUserRoleId !== 1 && currentUserRoleId !== 2) { // 1=admin, 2=manager, 3=sales
-      return res.status(403).json({
-        success: false,
-        message: 'Only admins and managers can view all users'
-      });
-    }
-    
-    // Get all users
-    const query = `
-      SELECT id, full_name, email, username, role_id, is_active
-      FROM users
-      ORDER BY created_at DESC
-    `;
-    
-    pool.query(query, (error, results) => {
-      if (error) {
-        return res.status(500).json({
-          success: false,
-          message: 'Error retrieving users',
-          error: error.message
-        });
-      }
-      
-      res.status(200).json({
-        users: results.rows
-      });
-    });
+    const { organizationId } = tenantOf(req);
+    res.status(200).json({ users: await listMembers(organizationId) });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
+    return serverError(res, 'Error retrieving users', error);
   }
 };
 
 /**
- * Create a new user
+ * Add a member to the active organization
  * @route   POST /users
- * @desc    Create a new user with provided information
- * @access  Private (Admin only)
+ * @access  settings.users.manage (cannot grant a role above the actor's own privileges)
  */
 const createUser = async (req, res) => {
   try {
-    // Extract user data from request body
-    const { full_name, email, password, roleId } = req.body;
+    const { full_name, email, password, roleId, roleKey } = req.body;
 
-    // Validate required fields
-    if (!full_name || !email || !password || !roleId) {
+    if (!full_name || !email || !password || (!roleId && !roleKey)) {
       return res.status(400).json({
         success: false,
         message: 'All fields are required: full_name, email, password, roleId'
       });
     }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({
         success: false,
@@ -134,69 +93,147 @@ const createUser = async (req, res) => {
       });
     }
 
-    // Hash the password
-    const saltRounds = 12;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    const passwordCheck = passwordSchema.safeParse(password);
+    if (!passwordCheck.success) {
+      return res.status(400).json({ success: false, message: passwordCheck.error.issues[0].message });
+    }
 
-    // Generate username from email
-    const username = email.split('@')[0];
+    const role = await resolveAssignableRole(req.auth.organizationId, { roleKey, legacyRoleId: roleId });
+    if (!role) {
+      return res.status(400).json({ success: false, message: 'Unknown role' });
+    }
 
-    // Insert the new user into the database
-    const query = `
-      INSERT INTO users (username, full_name, email, password_hash, role_id, is_active)
-      VALUES ($1, $2, $3, $4, $5, true)
-      RETURNING id
-    `;
+    const { member, created } = await addMember(req.auth, {
+      email: email.trim(),
+      fullName: full_name,
+      password,
+      role
+    });
 
-    pool.query(query, [username, full_name, email, hashedPassword, roleId], (error, results) => {
-      if (error) {
-        // Check for duplicate email error
-        if (error.code === '23505') {
-          return res.status(409).json({
-            success: false,
-            message: 'Email already exists'
-          });
-        }
-        return res.status(500).json({
-          success: false,
-          message: 'Error creating user',
-          error: error.message
-        });
-      }
-
-      // Return the created user with all necessary properties
-      res.status(201).json({
-        message: 'User created successfully',
-        user: {
-          id: results.rows[0].id,
-          username: username,
-          full_name: full_name,
-          email: email,
-          role_id: roleId,
-          is_active: true
-        }
-      });
+    res.status(201).json({
+      message: created ? 'User created successfully' : 'User invited to the organization',
+      user: member
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
+    return handleMemberError(res, error, 'Error creating user');
   }
 };
 
 /**
- * Request password reset
- * @route   POST /users/forgot-password
- * @desc    Generate a password reset token for a user and send email
- * @access  Public
+ * Update a member. Role changes apply to the membership in this organization.
+ * Identity fields (name/email/username) can only be changed for users who
+ * belong to no other organization, or by the user themselves.
+ * @route   PUT /users/:id
+ * @access  settings.users.manage
+ */
+const updateUser = async (req, res) => {
+  try {
+    const { organizationId, userId: actorId } = tenantOf(req);
+    const targetId = parseId(req.params.id);
+    const { full_name, email, username, role_id, roleKey } = req.body;
+
+    if (!full_name || !email || !username || (!role_id && !roleKey)) {
+      return res.status(400).json({
+        success: false,
+        message: 'All fields are required: full_name, email, username, role_id'
+      });
+    }
+
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid email format'
+      });
+    }
+
+    const current = targetId === null ? null : await getMember(organizationId, targetId);
+    if (!current) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const role = await resolveAssignableRole(organizationId, { roleKey, legacyRoleId: role_id });
+    if (!role) {
+      return res.status(400).json({ success: false, message: 'Unknown role' });
+    }
+    if (role.key !== current.role_key) {
+      await changeMemberRole(req.auth, targetId, role);
+    }
+
+    const identityChanged =
+      full_name !== current.full_name || email !== current.email || username !== current.username;
+    if (identityChanged) {
+      if (targetId !== actorId && !(await isExclusiveMember(organizationId, targetId))) {
+        return res.status(403).json({
+          success: false,
+          message: 'This user belongs to other organizations; only they can change their profile'
+        });
+      }
+      await pool.query('UPDATE users SET full_name = $1, email = $2, username = $3 WHERE id = $4', [
+        full_name,
+        email,
+        username,
+        targetId
+      ]);
+      await recordAuditEvent({
+        action: 'USER_PROFILE_UPDATED',
+        tableName: 'users',
+        recordId: targetId,
+        oldValues: { full_name: current.full_name, email: current.email, username: current.username },
+        newValues: { full_name, email, username }
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'User updated successfully',
+      user: await getMember(organizationId, targetId)
+    });
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ success: false, message: 'Email or username already exists' });
+    }
+    return handleMemberError(res, error, 'Error updating user');
+  }
+};
+
+/**
+ * Toggle the member's status in this organization (active ⇄ suspended).
+ * Suspending revokes the member's sessions for this organization.
+ * @route   PATCH /users/:id/status
+ * @access  settings.users.manage
+ */
+const toggleUserStatus = async (req, res) => {
+  try {
+    const { organizationId } = tenantOf(req);
+    const targetId = parseId(req.params.id);
+    const current = targetId === null ? null : await getMember(organizationId, targetId);
+    if (!current) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    if (current.membership_status === 'invited') {
+      return res.status(409).json({ success: false, message: 'The invitation has not been accepted yet' });
+    }
+
+    const activate = current.membership_status !== 'active';
+    await setMemberStatus(req.auth, targetId, activate ? 'active' : 'suspended');
+
+    res.status(200).json({
+      success: true,
+      message: `User ${activate ? 'activated' : 'deactivated'} successfully`,
+      user: await getMember(organizationId, targetId)
+    });
+  } catch (error) {
+    return handleMemberError(res, error, 'Error updating user status');
+  }
+};
+
+/**
+ * @route   POST /users/forgot-password (public, rate limited)
  */
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
 
-    // Validate email
     if (!email) {
       return res.status(400).json({
         success: false,
@@ -204,8 +241,6 @@ const forgotPassword = async (req, res) => {
       });
     }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({
         success: false,
@@ -213,84 +248,45 @@ const forgotPassword = async (req, res) => {
       });
     }
 
-    // Check if user exists
-    const userQuery = 'SELECT id FROM users WHERE email = $1';
-    const userResult = await pool.query(userQuery, [email]);
-
+    const userResult = await pool.query('SELECT id, email FROM users WHERE lower(email) = lower($1)', [email]);
     if (userResult.rows.length === 0) {
-      // Don't reveal if user exists or not for security
-      return res.status(200).json({
-        success: true,
-        message: 'If a user with that email exists, a password reset link has been sent'
-      });
+      // Don't reveal whether the user exists
+      return res.status(200).json(GENERIC_RESET_RESPONSE);
     }
 
-    // Generate a secure reset token
     const resetToken = crypto.randomBytes(32).toString('hex');
     const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+    const expiryTime = new Date(Date.now() + 60 * 60 * 1000);
 
-    // Set token expiry time (1 hour from now)
-    const expiryTime = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    await pool.query('INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES ($1, $2, $3)', [
+      userResult.rows[0].id,
+      hashedToken,
+      expiryTime
+    ]);
 
-    // Store the hashed token and expiry in the password_resets table
-    const insertQuery = 'INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES ($1, $2, $3)';
-    await pool.query(insertQuery, [userResult.rows[0].id, hashedToken, expiryTime]);
-
-    // Send password reset email
     try {
-      console.log('Attempting to send password reset email to:', email);
-      // Import email service
       const emailService = (await import('../services/email.service.js')).default;
-
-      // Get the frontend URL from environment or use default
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      console.log('Using frontend URL:', frontendUrl);
-
-      // Send the password reset email
-      const emailSent = await emailService.sendPasswordResetEmail(email, resetToken, frontendUrl);
-
-      if (!emailSent) {
-        console.error('Failed to send password reset email');
-        // Still return success to avoid revealing user existence
-        return res.status(200).json({
-          success: true,
-          message: 'If a user with that email exists, a password reset link has been sent'
-        });
-      }
+      const emailSent = await emailService.sendPasswordResetEmail(userResult.rows[0].email, resetToken, frontendUrl);
+      if (!emailSent) console.error('Failed to send password reset email');
     } catch (emailError) {
-      console.error('Error sending password reset email:', emailError);
-      // Still return success to avoid revealing user existence
-      return res.status(200).json({
-        success: true,
-        message: 'If a user with that email exists, a password reset link has been sent'
-      });
+      console.error('Error sending password reset email:', emailError instanceof Error ? emailError.message : emailError);
     }
 
-    // Return success message
-    res.status(200).json({
-      success: true,
-      message: 'If a user with that email exists, a password reset link has been sent'
-    });
+    res.status(200).json(GENERIC_RESET_RESPONSE);
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
+    return serverError(res, 'Server error', error);
   }
 };
 
 /**
- * Reset password with token
- * @route   POST /users/reset-password
- * @desc    Reset user password using a valid token
- * @access  Public
+ * Reset password with token. Revokes every existing session of the user.
+ * @route   POST /users/reset-password (public, rate limited)
  */
 const resetPassword = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
 
-    // Validate input
     if (!token || !newPassword) {
       return res.status(400).json({
         success: false,
@@ -298,7 +294,6 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    // Validate password length (minimum 8 characters)
     if (newPassword.length < 8) {
       return res.status(400).json({
         success: false,
@@ -306,7 +301,6 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    // Validate password complexity (at least one letter and one number)
     const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d@$!%*#?&]{8,}$/;
     if (!passwordRegex.test(newPassword)) {
       return res.status(400).json({
@@ -315,141 +309,56 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    // Hash the provided token to compare with stored hash
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    const hashedToken = crypto.createHash('sha256').update(String(token)).digest('hex');
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-    // Find user with valid token that hasn't expired
-    const tokenQuery = 'SELECT user_id FROM password_resets WHERE token_hash = $1 AND expires_at > NOW() AND used = false';
-    const tokenResult = await pool.query(tokenQuery, [hashedToken]);
-
-    if (tokenResult.rows.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid or expired reset token'
-      });
+    const client = await pool.connect();
+    let userId;
+    try {
+      await client.query('BEGIN');
+      const tokenResult = await client.query(
+        `UPDATE password_resets SET used = true
+         WHERE token_hash = $1 AND expires_at > NOW() AND used = false
+         RETURNING user_id`,
+        [hashedToken]
+      );
+      if (tokenResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or expired reset token'
+        });
+      }
+      userId = tokenResult.rows[0].user_id;
+      await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashedPassword, userId]);
+      await revokeUserSessions(userId, 'password_reset', undefined, client);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
     }
 
-    const userId = tokenResult.rows[0].user_id;
-
-    // Hash the new password
-    const saltRounds = 12;
-    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
-
-    // Update password
-    const updateQuery = 'UPDATE users SET password_hash = $1 WHERE id = $2';
-    await pool.query(updateQuery, [hashedPassword, userId]);
-
-    // Mark token as used
-    const markTokenQuery = 'UPDATE password_resets SET used = true WHERE token_hash = $1';
-    await pool.query(markTokenQuery, [hashedToken]);
+    await recordAuditEvent({
+      organizationId: null,
+      userId,
+      action: 'PASSWORD_RESET',
+      tableName: 'users',
+      recordId: userId
+    });
 
     res.status(200).json({
       success: true,
       message: 'Password has been reset successfully'
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
+    return serverError(res, 'Server error', error);
   }
 };
 
 /**
- * Update a user
- * @route   PUT /users/:id
- * @desc    Update user information
- * @access  Private (Admin only)
- */
-const updateUser = async (req, res) => {
-  try {
-    // Get user ID from params
-    const { id } = req.params;
-    
-    // Extract user data from request body
-    const { full_name, email, username, role_id } = req.body;
-    
-    // Get role of current user from JWT token
-    const currentUserRoleId = req.user.roleId;
-    
-    // Check if current user is an admin
-    if (currentUserRoleId !== 1) { // 1=admin
-      return res.status(403).json({
-        success: false,
-        message: 'Only admins can update users'
-      });
-    }
-    
-    // Validate required fields
-    if (!full_name || !email || !username || !role_id) {
-      return res.status(400).json({
-        success: false,
-        message: 'All fields are required: full_name, email, username, role_id'
-      });
-    }
-    
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid email format'
-      });
-    }
-    
-    // Update user in database
-    const query = `
-      UPDATE users 
-      SET full_name = $1, email = $2, username = $3, role_id = $4 
-      WHERE id = $5
-      RETURNING id, full_name, email, username, role_id, is_active
-    `;
-    
-    pool.query(query, [full_name, email, username, role_id, id], (error, results) => {
-      if (error) {
-        // Check for duplicate email error
-        if (error.code === '23505') {
-          return res.status(409).json({
-            success: false,
-            message: 'Email already exists'
-          });
-        }
-        return res.status(500).json({
-          success: false,
-          message: 'Error updating user',
-          error: error.message
-        });
-      }
-      
-      if (results.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: 'User not found'
-        });
-      }
-      
-      // Return updated user
-      res.status(200).json({
-        success: true,
-        message: 'User updated successfully',
-        user: results.rows[0]
-      });
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
-  }
-};
-
-/**
- * Verify reset token
- * @route   POST /users/verify-reset-token
- * @desc    Check if a reset token is valid
- * @access  Public
+ * @route   POST /users/verify-reset-token (public, rate limited)
  */
 const verifyResetToken = async (req, res) => {
   try {
@@ -462,12 +371,11 @@ const verifyResetToken = async (req, res) => {
       });
     }
 
-    // Hash the provided token to compare with stored hash
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-
-    // Find user with valid token that hasn't expired
-    const tokenQuery = 'SELECT user_id FROM password_resets WHERE token_hash = $1 AND expires_at > NOW() AND used = false';
-    const tokenResult = await pool.query(tokenQuery, [hashedToken]);
+    const hashedToken = crypto.createHash('sha256').update(String(token)).digest('hex');
+    const tokenResult = await pool.query(
+      'SELECT 1 FROM password_resets WHERE token_hash = $1 AND expires_at > NOW() AND used = false',
+      [hashedToken]
+    );
 
     if (tokenResult.rows.length === 0) {
       return res.status(400).json({
@@ -481,72 +389,7 @@ const verifyResetToken = async (req, res) => {
       message: 'Token is valid'
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
-  }
-};
-
-/**
- * Toggle user status
- * @route   PATCH /users/:id/status
- * @desc    Toggle user active/inactive status
- * @access  Private (Admin only)
- */
-const toggleUserStatus = async (req, res) => {
-  try {
-    // Get user ID from params
-    const { id } = req.params;
-
-    // Get role of current user from JWT token
-    const currentUserRoleId = req.user.roleId;
-
-    // Check if current user is an admin
-    if (currentUserRoleId !== 1) { // 1=admin
-      return res.status(403).json({
-        success: false,
-        message: 'Only admins can update user status'
-      });
-    }
-
-    // Get current user status
-    const getCurrentStatusQuery = 'SELECT is_active FROM users WHERE id = $1';
-    const currentStatusResult = await pool.query(getCurrentStatusQuery, [id]);
-
-    if (currentStatusResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    // Toggle status
-    const newStatus = !currentStatusResult.rows[0].is_active;
-
-    // Update user status in database
-    const updateQuery = `
-      UPDATE users
-      SET is_active = $1
-      WHERE id = $2
-      RETURNING id, full_name, email, username, role_id, is_active
-    `;
-
-    const result = await pool.query(updateQuery, [newStatus, id]);
-
-    // Return updated user
-    res.status(200).json({
-      success: true,
-      message: `User ${newStatus ? 'activated' : 'deactivated'} successfully`,
-      user: result.rows[0]
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
+    return serverError(res, 'Server error', error);
   }
 };
 

@@ -1,496 +1,326 @@
 import pool from '../config/db.js';
+import { parseId, scopeFor, serverError, tenantOf } from '../platform/tenancy.js';
+
+/**
+ * Reports aggregate ONLY the caller's organization. With `own` scope the
+ * aggregates are further limited to the caller's own records.
+ *
+ * `scopedFilter` returns SQL conditions + params starting at $1 for the
+ * organization, with an optional ownership column.
+ */
+const scopedFilter = (req, permission, ownerColumn) => {
+  const { organizationId, userId } = tenantOf(req);
+  const conditions = ['organization_id = $1'];
+  const params = [organizationId];
+  if (scopeFor(req, permission) !== 'organization') {
+    params.push(userId);
+    conditions.push(`${ownerColumn} = $${params.length}`);
+  }
+  return { conditions, params };
+};
+
+const countWhere = async (table, filter, extraConditions = []) => {
+  const where = [...filter.conditions, ...extraConditions].join(' AND ');
+  const result = await pool.query(`SELECT COUNT(*) AS count FROM ${table} WHERE ${where}`, filter.params);
+  return parseInt(result.rows[0].count);
+};
 
 /**
  * Get dashboard summary with key metrics
- * @route   GET /report/dashboard-summary
- * @desc    Get dashboard summary with leads, followups, calls and messages metrics
- * @access  Private
+ * @route   GET /reports/dashboard-summary
+ * @access  crm.reports.read
  */
 const getDashboardSummary = async (req, res) => {
   try {
-    const { roleId, userId } = req.user;
+    const leads = scopedFilter(req, 'crm.reports.read', 'assigned_to');
+    const followups = scopedFilter(req, 'crm.reports.read', 'assigned_to');
+    const calls = scopedFilter(req, 'crm.reports.read', 'user_id');
+    const messages = scopedFilter(req, 'crm.reports.read', 'user_id');
 
-    // Base query conditions based on user role
-    const isAdminOrManager = roleId === 1 || roleId === 2; // Assuming 1=admin, 2=manager
+    const [totalLeads, leadsByStatusResult, pendingFollowups, overdueFollowups, callsToday, messagesToday] =
+      await Promise.all([
+        countWhere('leads', leads),
+        pool.query(
+          `SELECT status, COUNT(*) as count FROM leads WHERE ${leads.conditions.join(' AND ')} GROUP BY status`,
+          leads.params
+        ),
+        countWhere('followups', followups, ["status = 'Pending'"]),
+        countWhere('followups', followups, ["status = 'Pending'", 'followup_date < NOW()']),
+        countWhere('calls', calls, ['DATE(start_time) = CURRENT_DATE']),
+        countWhere('messages', messages, ['DATE(sent_at) = CURRENT_DATE'])
+      ]);
 
-    // Get total leads count
-    const totalLeadsQuery = `SELECT COUNT(*) as count FROM leads ${isAdminOrManager ? '' : 'WHERE assigned_to = $1'}`;
-    const totalLeadsParams = isAdminOrManager ? [] : [userId];
-    const totalLeadsResult = await pool.query(totalLeadsQuery, totalLeadsParams);
-    const totalLeads = parseInt(totalLeadsResult.rows[0].count);
-
-    // Get leads by status
-    const leadsByStatusQuery = `
-      SELECT status, COUNT(*) as count
-      FROM leads
-      ${isAdminOrManager ? '' : 'WHERE assigned_to = $1'}
-      GROUP BY status
-    `;
-    const leadsByStatusParams = isAdminOrManager ? [] : [userId];
-    const leadsByStatusResult = await pool.query(leadsByStatusQuery, leadsByStatusParams);
-    const leadsByStatus = leadsByStatusResult.rows;
-
-    // Get pending followups
-    const pendingFollowupsQuery = `
-      SELECT COUNT(*) as count
-      FROM followups
-      ${isAdminOrManager ? 'WHERE' : 'WHERE assigned_to = $1 AND'} status = 'Pending'
-    `;
-    const pendingFollowupsParams = isAdminOrManager ? [] : [userId];
-    const pendingFollowupsResult = await pool.query(pendingFollowupsQuery, pendingFollowupsParams);
-    const pendingFollowups = parseInt(pendingFollowupsResult.rows[0].count);
-
-    // Get overdue followups
-    const overdueFollowupsQuery = `
-      SELECT COUNT(*) as count
-      FROM followups
-      ${isAdminOrManager ? 'WHERE' : 'WHERE assigned_to = $1 AND'}
-      status = 'Pending' AND followup_date < NOW()
-    `;
-    const overdueFollowupsParams = isAdminOrManager ? [] : [userId];
-    const overdueFollowupsResult = await pool.query(overdueFollowupsQuery, overdueFollowupsParams);
-    const overdueFollowups = parseInt(overdueFollowupsResult.rows[0].count);
-
-    // Get calls today
-    const callsTodayQuery = `
-      SELECT COUNT(*) as count
-      FROM calls
-      ${isAdminOrManager ? 'WHERE' : 'WHERE user_id = $1 AND'}
-      DATE(start_time) = CURRENT_DATE
-    `;
-    const callsTodayParams = isAdminOrManager ? [] : [userId];
-    const callsTodayResult = await pool.query(callsTodayQuery, callsTodayParams);
-    const callsToday = parseInt(callsTodayResult.rows[0].count);
-
-    // Get messages today
-    const messagesTodayQuery = `
-      SELECT COUNT(*) as count
-      FROM messages
-      ${isAdminOrManager ? 'WHERE' : 'WHERE user_id = $1 AND'}
-      DATE(sent_at) = CURRENT_DATE
-    `;
-    const messagesTodayParams = isAdminOrManager ? [] : [userId];
-    const messagesTodayResult = await pool.query(messagesTodayQuery, messagesTodayParams);
-    const messagesToday = parseInt(messagesTodayResult.rows[0].count);
-
-    // Return the dashboard summary
     res.status(200).json({
       totalLeads,
-      leadsByStatus,
+      leadsByStatus: leadsByStatusResult.rows,
       pendingFollowups,
       overdueFollowups,
       callsToday,
       messagesToday
     });
   } catch (error) {
-    console.error('Error fetching dashboard summary:', error);
-    res.status(500).json({
-      message: 'Error fetching dashboard summary',
-      error: error.message
-    });
+    return serverError(res, 'Error fetching dashboard summary', error);
   }
 };
 
 /**
- * Get sales performance report
- * @route   GET /sales-performance
- * @desc    Get performance metrics for each sales user
- * @access  Private (Admin/Manager only)
+ * Get sales performance report (members of the organization with a non-admin role)
+ * @route   GET /reports/sales-performance
+ * @access  crm.reports.read with organization scope
  */
 const getSalesPerformance = async (req, res) => {
   try {
-    const { roleId } = req.user;
-    const { days = 30, userId } = req.query;
+    const { organizationId } = tenantOf(req);
+    const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 3650);
+    const selectedUserId = req.query.userId ? parseId(req.query.userId) : null;
 
-    // Check if user is admin or manager
-    if (roleId !== 1 && roleId !== 2) {
-      return res.status(403).json({
-        message: 'Access denied. Admin or Manager privileges required.'
-      });
+    const params = [organizationId, days];
+    let memberFilter = '';
+    if (req.query.userId) {
+      params.push(selectedUserId ?? 0);
+      memberFilter = `AND u.id = $${params.length}`;
     }
 
-    // Get all sales users (Managers and Sales)
-    const salesUsersQuery = `
-      SELECT id, full_name, email
-      FROM users
-      WHERE role_id IN ($1, $2)
-    `;
-    const salesUsersResult = await pool.query(salesUsersQuery, [2, 3]);
-    let salesUsers = salesUsersResult.rows;
+    const result = await pool.query(
+      `SELECT u.id, u.full_name AS name, u.email,
+              COUNT(l.id) AS total_leads,
+              COUNT(l.id) FILTER (WHERE l.status = 'Converted') AS converted_leads
+       FROM organization_memberships m
+       JOIN users u ON u.id = m.user_id
+       JOIN roles r ON r.id = m.role_id
+       LEFT JOIN leads l
+         ON l.assigned_to = u.id
+        AND l.organization_id = m.organization_id
+        AND l.created_at >= NOW() - make_interval(days => $2)
+       WHERE m.organization_id = $1 AND m.status = 'active' AND r.key <> 'admin' ${memberFilter}
+       GROUP BY u.id
+       ORDER BY u.full_name`,
+      params
+    );
 
-    // Filter by specific user if provided
-    if (userId) {
-      salesUsers = salesUsers.filter(user => user.id === parseInt(userId));
-    }
-
-    // Calculate the date range
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - parseInt(days));
-
-    // For each sales user, get their performance metrics
-    const salesPerformance = [];
-
-    for (const user of salesUsers) {
-      // Get total leads assigned within the date range
-      const totalLeadsQuery = `
-        SELECT COUNT(*) as count
-        FROM leads
-        WHERE assigned_to = $1 AND created_at >= $2
-      `;
-      const totalLeadsResult = await pool.query(totalLeadsQuery, [user.id, startDate]);
-      const totalLeads = parseInt(totalLeadsResult.rows[0].count);
-
-      // Get converted leads within the date range
-      const convertedLeadsQuery = `
-        SELECT COUNT(*) as count
-        FROM leads
-        WHERE assigned_to = $1 AND status = 'Converted' AND created_at >= $2
-      `;
-      const convertedLeadsResult = await pool.query(convertedLeadsQuery, [user.id, startDate]);
-      const convertedLeads = parseInt(convertedLeadsResult.rows[0].count);
-
-      // Calculate conversion rate
-      const conversionRate = totalLeads > 0 ? ((convertedLeads / totalLeads) * 100).toFixed(2) : 0;
-
-      // Add user performance to array
-      salesPerformance.push({
-        id: user.id,
-        name: user.full_name,
-        email: user.email,
+    const salesPerformance = result.rows.map((row) => {
+      const totalLeads = parseInt(row.total_leads);
+      const convertedLeads = parseInt(row.converted_leads);
+      return {
+        id: row.id,
+        name: row.name,
+        email: row.email,
         totalLeads,
         convertedLeads,
-        conversionRate: parseFloat(conversionRate)
-      });
-    }
+        conversionRate: totalLeads > 0 ? parseFloat(((convertedLeads / totalLeads) * 100).toFixed(2)) : 0
+      };
+    });
 
-    // Return the sales performance report in the expected format
     res.status(200).json({
       data: salesPerformance
     });
   } catch (error) {
-    console.error('Error fetching sales performance:', error);
-    res.status(500).json({
-      message: 'Error fetching sales performance',
-      error: error.message
-    });
+    return serverError(res, 'Error fetching sales performance', error);
   }
 };
 
 /**
  * Get lead aging report
- * @route   GET /lead-aging
- * @desc    Get lead aging distribution in time buckets
- * @access  Private
+ * @route   GET /reports/lead-aging
+ * @access  crm.reports.read
  */
 const getLeadAging = async (req, res) => {
   try {
-    const { roleId, userId } = req.user;
+    const filter = scopedFilter(req, 'crm.reports.read', 'assigned_to');
+    const result = await pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE age <= 1) AS "0-1_days",
+         COUNT(*) FILTER (WHERE age BETWEEN 2 AND 3) AS "2-3_days",
+         COUNT(*) FILTER (WHERE age BETWEEN 4 AND 7) AS "4-7_days",
+         COUNT(*) FILTER (WHERE age > 7) AS "7+_days"
+       FROM (
+         SELECT EXTRACT(DAYS FROM NOW() - created_at) AS age
+         FROM leads
+         WHERE ${filter.conditions.join(' AND ')}
+       ) AS aged_leads`,
+      filter.params
+    );
+    const row = result.rows[0];
 
-    // Check if user is admin or manager
-    const isAdminOrManager = roleId === 1 || roleId === 2;
-
-    // Get lead aging distribution
-    const leadAgingQuery = `
-      SELECT
-        SUM(CASE WHEN age <= 1 THEN 1 ELSE 0 END) as "0-1_days",
-        SUM(CASE WHEN age BETWEEN 2 AND 3 THEN 1 ELSE 0 END) as "2-3_days",
-        SUM(CASE WHEN age BETWEEN 4 AND 7 THEN 1 ELSE 0 END) as "4-7_days",
-        SUM(CASE WHEN age > 7 THEN 1 ELSE 0 END) as "7+_days"
-      FROM (
-        SELECT
-          id,
-          assigned_to,
-          created_at,
-          EXTRACT(DAYS FROM NOW() - created_at) as age
-        FROM leads
-        ${isAdminOrManager ? '' : 'WHERE assigned_to = $1'}
-      ) as aged_leads
-    `;
-    const leadAgingParams = isAdminOrManager ? [] : [userId];
-
-    const leadAgingResult = await pool.query(leadAgingQuery, leadAgingParams);
-    const leadAgingData = leadAgingResult.rows[0];
-
-    // Format the response
-    const leadAging = {
-      "0-1_days": parseInt(leadAgingData["0-1_days"]),
-      "2-3_days": parseInt(leadAgingData["2-3_days"]),
-      "4-7_days": parseInt(leadAgingData["4-7_days"]),
-      "7+_days": parseInt(leadAgingData["7+_days"])
-    };
-
-    // Return the lead aging report
-    res.status(200).json(leadAging);
-  } catch (error) {
-    console.error('Error fetching lead aging report:', error);
-    res.status(500).json({
-      message: 'Error fetching lead aging report',
-      error: error.message
+    res.status(200).json({
+      '0-1_days': parseInt(row['0-1_days']),
+      '2-3_days': parseInt(row['2-3_days']),
+      '4-7_days': parseInt(row['4-7_days']),
+      '7+_days': parseInt(row['7+_days'])
     });
+  } catch (error) {
+    return serverError(res, 'Error fetching lead aging report', error);
   }
 };
 
 /**
- * Get conversion report
- * @route   GET /conversion-report
- * @desc    Get lead conversion funnel by status
- * @access  Private
+ * Get conversion report (lead counts by status)
+ * @route   GET /reports/conversion-report
+ * @access  crm.reports.read
  */
 const getConversionReport = async (req, res) => {
   try {
-    const { roleId, userId } = req.user;
+    const filter = scopedFilter(req, 'crm.reports.read', 'assigned_to');
     const { days, userId: selectedUserId } = req.query;
 
-    // Check if user is admin or manager
-    const isAdminOrManager = roleId === 1 || roleId === 2;
-
-    // Build WHERE conditions
-    const conditions = [];
-    const params = [];
-    let paramIndex = 1;
-
-    // Add date range filter
-    if (days) {
-      conditions.push(`created_at >= NOW() - INTERVAL '${days} days'`);
+    if (days !== undefined) {
+      // Parameterized (the pre-Phase-2 code interpolated `days` into SQL).
+      const dayCount = /^\d{1,4}$/.test(String(days)) ? Number(days) : NaN;
+      if (!Number.isInteger(dayCount) || dayCount < 1 || dayCount > 3650) {
+        return res.status(400).json({ message: 'days must be an integer between 1 and 3650' });
+      }
+      filter.params.push(dayCount);
+      filter.conditions.push(`created_at >= NOW() - make_interval(days => $${filter.params.length})`);
     }
 
-    // Add user filter (only for admin/manager)
-    if (isAdminOrManager && selectedUserId) {
-      conditions.push(`assigned_to = $${paramIndex++}`);
-      params.push(selectedUserId);
-    } else if (!isAdminOrManager) {
-      // Sales users can only see their own leads
-      conditions.push(`assigned_to = $${paramIndex++}`);
-      params.push(userId);
+    if (selectedUserId && scopeFor(req, 'crm.reports.read') === 'organization') {
+      filter.params.push(parseId(selectedUserId) ?? 0);
+      filter.conditions.push(`assigned_to = $${filter.params.length}`);
     }
 
-    // Build WHERE clause
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const result = await pool.query(
+      `SELECT status, COUNT(*) as count
+       FROM leads
+       WHERE ${filter.conditions.join(' AND ')}
+       GROUP BY status
+       ORDER BY CASE
+         WHEN status = 'New' THEN 1
+         WHEN status = 'Contacted' THEN 2
+         WHEN status = 'Qualified' THEN 3
+         WHEN status = 'Converted' THEN 4
+         ELSE 5
+       END`,
+      filter.params
+    );
 
-    // Get lead counts by status in funnel order
-    const conversionQuery = `
-      SELECT
-        status,
-        COUNT(*) as count
-      FROM leads
-      ${whereClause}
-      GROUP BY status
-      ORDER BY
-        CASE
-          WHEN status = 'New' THEN 1
-          WHEN status = 'Contacted' THEN 2
-          WHEN status = 'Qualified' THEN 3
-          WHEN status = 'Converted' THEN 4
-          ELSE 5
-        END
-    `;
-
-    const conversionResult = await pool.query(conversionQuery, params);
-    const conversionData = conversionResult.rows;
-
-    // Format the response as a simple object with status as key
     const conversionReport = {};
-    conversionData.forEach(item => {
+    result.rows.forEach((item) => {
       conversionReport[item.status] = parseInt(item.count);
     });
 
-    // Return the conversion report
     res.status(200).json(conversionReport);
   } catch (error) {
-    console.error('Error fetching conversion report:', error);
-    res.status(500).json({
-      message: 'Error fetching conversion report',
-      error: error.message
-    });
+    return serverError(res, 'Error fetching conversion report', error);
   }
+};
+
+/** Quotes a CSV cell and neutralises spreadsheet formula injection. */
+const csvCell = (value) => {
+  if (value === null || value === undefined) return '""';
+  let text = value.toString().trim().replace(/\r?\n/g, ' ');
+  if (/^[=+\-@\t]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
 };
 
 /**
  * Export leads to CSV
- * @route   GET /export-leads-csv
- * @desc    Export leads data as CSV file with role-based filtering
- * @access  Private
+ * @route   GET /reports/export-leads-csv
+ * @access  crm.reports.export (own scope: my leads)
  */
 const exportLeadsCSV = async (req, res) => {
   try {
-    const { roleId, userId } = req.user;
-
-    // Check if user is admin or manager
-    const isAdminOrManager = roleId === 1 || roleId === 2;
-
-    // Check if route is admin/manager only
-    const isAdminManagerOnly = req.path.includes('/export/leads');
-
-    // If route is admin/manager only and user doesn't have required role
-    if (isAdminManagerOnly && !isAdminOrManager) {
-      return res.status(403).json({
-        message: 'Access denied. Admin or Manager role required.'
-      });
+    const { organizationId, userId } = tenantOf(req);
+    const params = [organizationId];
+    let where = 'WHERE l.organization_id = $1';
+    if (scopeFor(req, 'crm.reports.export') !== 'organization') {
+      params.push(userId);
+      where += ` AND l.assigned_to = $${params.length}`;
     }
 
-    // Get leads with user details
-    const leadsQuery = `
-      SELECT
-        l.id,
-        l.full_name,
-        l.mobile_number,
-        l.email,
-        l.status,
-        l.created_at,
-        u.full_name as assigned_to_name
-      FROM leads l
-      LEFT JOIN users u ON l.assigned_to = u.id
-      ${isAdminOrManager ? '' : 'WHERE l.assigned_to = $1'}
-      ORDER BY l.created_at DESC
-    `;
-    const leadsParams = isAdminOrManager ? [] : [userId];
-
-    const leadsResult = await pool.query(leadsQuery, leadsParams);
+    const leadsResult = await pool.query(
+      `SELECT l.id, l.full_name, l.mobile_number, l.email, l.status, l.created_at,
+              u.full_name as assigned_to_name
+       FROM leads l
+       LEFT JOIN users u ON l.assigned_to = u.id
+       ${where}
+       ORDER BY l.created_at DESC`,
+      params
+    );
     const leads = leadsResult.rows;
 
-    // If no leads found
     if (leads.length === 0) {
       return res.status(404).json({
         message: 'No leads found'
       });
     }
 
-    // Create export date in YYYY-MM-DD format
-    const today = new Date();
-    const exportDate = today.toISOString().split('T')[0];
-
-    // Convert to CSV format
+    const exportDate = new Date().toISOString().split('T')[0];
     const headers = ['ID', 'Full Name', 'Mobile Number', 'Email', 'Status', 'Created Date', 'Assigned Sales / Manager'];
-    const csvRows = [];
+    const csvRows = [`# Exported By: ${req.user.email} | Export Date: ${exportDate}`, headers.join(',')];
 
-    // Add metadata comment row at top
-    csvRows.push(`# Exported By: ${req.user.email} | Export Date: ${exportDate}`);
-
-    // Add headers
-    csvRows.push(headers.join(','));
-
-    // Add data rows
-    leads.forEach(lead => {
-      // Sanitize and trim values
-      const sanitize = (value) => {
-        if (!value) return '';
-        return value.toString().trim().replace(/\n/g, ' ');
-      };
-
-      const row = [
-        lead.id,
-        `"${sanitize(lead.full_name)}"`,
-        `"${sanitize(lead.mobile_number)}"`,
-        `"${sanitize(lead.email)}"`,
-        lead.status.charAt(0).toUpperCase() + lead.status.slice(1), // Capitalize first letter
-        `"${new Date(lead.created_at).toISOString().split('T')[0]}"`, // Format as YYYY-MM-DD
-        `"${sanitize(lead.assigned_to_name) || 'Unassigned'}"` // Handle null with "Unassigned"
-      ];
-      csvRows.push(row.join(','));
+    leads.forEach((lead) => {
+      csvRows.push(
+        [
+          lead.id,
+          csvCell(lead.full_name),
+          csvCell(lead.mobile_number),
+          csvCell(lead.email),
+          csvCell(lead.status ? lead.status.charAt(0).toUpperCase() + lead.status.slice(1) : ''),
+          csvCell(new Date(lead.created_at).toISOString().split('T')[0]),
+          csvCell(lead.assigned_to_name || 'Unassigned')
+        ].join(',')
+      );
     });
 
-    // Convert rows to CSV string
-    const csvString = csvRows.join('');
-
-    // Set response headers for file download
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=leads_export.csv');
-
-    // Send CSV
-    res.status(200).send(csvString);
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(200).send(`${csvRows.join('\n')}\n`);
   } catch (error) {
-    console.error('Error exporting leads to CSV:', error);
-    res.status(500).json({
-      message: 'Error exporting leads to CSV',
-      error: error.message
-    });
+    return serverError(res, 'Error exporting leads to CSV', error);
   }
 };
 
 /**
  * Get leads over time data
- * @route   GET /leads-over-time
- * @desc    Get leads data grouped by time period (today, this week, this month)
- * @access  Private
+ * @route   GET /reports/leads-over-time
+ * @access  crm.reports.read
  */
 const getLeadsOverTime = async (req, res) => {
   try {
-    const { roleId, userId } = req.user;
     const { period = 'month' } = req.query;
-
-    // Base query conditions based on user role
-    const isAdminOrManager = roleId === 1 || roleId === 2;
-    const whereClause = isAdminOrManager ? '' : 'WHERE assigned_to = $1';
-    const params = isAdminOrManager ? [] : [userId];
-
-    let query = '';
-    let result = [];
+    const filter = scopedFilter(req, 'crm.reports.read', 'assigned_to');
+    const where = filter.conditions.join(' AND ');
+    let result;
 
     switch (period) {
-      case 'today':
-        query = `
-          SELECT 
-            EXTRACT(HOUR FROM created_at) as hour,
-            COUNT(*) as leads
-          FROM leads
-          ${whereClause}
-          ${isAdminOrManager ? 'WHERE' : 'AND'} DATE(created_at) = CURRENT_DATE
-          GROUP BY hour
-          ORDER BY hour
-        `;
-        result = await pool.query(query, params);
-        result = result.rows.map(row => ({
-          time: `${row.hour}:00`,
-          leads: parseInt(row.leads)
-        }));
+      case 'today': {
+        const rows = await pool.query(
+          `SELECT EXTRACT(HOUR FROM created_at) as hour, COUNT(*) as leads
+           FROM leads WHERE ${where} AND DATE(created_at) = CURRENT_DATE
+           GROUP BY hour ORDER BY hour`,
+          filter.params
+        );
+        result = rows.rows.map((row) => ({ time: `${row.hour}:00`, leads: parseInt(row.leads) }));
         break;
-
-      case 'week':
-        query = `
-          SELECT 
-            EXTRACT(DOW FROM created_at) as day_of_week,
-            COUNT(*) as leads
-          FROM leads
-          ${whereClause}
-          ${isAdminOrManager ? 'WHERE' : 'AND'} created_at >= DATE_TRUNC('week', CURRENT_DATE)
-          GROUP BY day_of_week
-          ORDER BY day_of_week
-        `;
-        result = await pool.query(query, params);
+      }
+      case 'week': {
+        const rows = await pool.query(
+          `SELECT EXTRACT(DOW FROM created_at) as day_of_week, COUNT(*) as leads
+           FROM leads WHERE ${where} AND created_at >= DATE_TRUNC('week', CURRENT_DATE)
+           GROUP BY day_of_week ORDER BY day_of_week`,
+          filter.params
+        );
         const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        result = result.rows.map(row => ({
-          time: days[row.day_of_week],
-          leads: parseInt(row.leads)
-        }));
+        result = rows.rows.map((row) => ({ time: days[row.day_of_week], leads: parseInt(row.leads) }));
         break;
-
+      }
       case 'month':
-      default:
-        query = `
-          SELECT 
-            EXTRACT(WEEK FROM created_at) as week,
-            COUNT(*) as leads
-          FROM leads
-          ${whereClause}
-          ${isAdminOrManager ? 'WHERE' : 'AND'} DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)
-          GROUP BY week
-          ORDER BY week
-        `;
-        result = await pool.query(query, params);
-        result = result.rows.map(row => ({
-          time: `Week ${row.week}`,
-          leads: parseInt(row.leads)
-        }));
+      default: {
+        const rows = await pool.query(
+          `SELECT EXTRACT(WEEK FROM created_at) as week, COUNT(*) as leads
+           FROM leads WHERE ${where} AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', CURRENT_DATE)
+           GROUP BY week ORDER BY week`,
+          filter.params
+        );
+        result = rows.rows.map((row) => ({ time: `Week ${row.week}`, leads: parseInt(row.leads) }));
         break;
+      }
     }
 
     res.status(200).json(result);
   } catch (error) {
-    console.error('Error fetching leads over time:', error);
-    res.status(500).json({
-      message: 'Error fetching leads over time',
-      error: error.message
-    });
+    return serverError(res, 'Error fetching leads over time', error);
   }
 };
 

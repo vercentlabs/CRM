@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import axios from '@/lib/axios';
+import Link from 'next/link';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import AppLayout from '@/components/layout/AppLayout';
 import { ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES } from '@/lib/constants';
@@ -58,9 +59,9 @@ const SalesPerformanceDetail = () => {
               <div className="px-3 py-3 sm:px-5 sm:py-5 md:px-6 md:py-6">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div className="mb-2 sm:mb-0">
-                    <a href="/reports/sales-performance" className="text-indigo-200 hover:text-white mb-2 inline-block text-xs sm:text-sm md:text-base">
+                    <Link href="/reports/sales-performance" className="text-indigo-200 hover:text-white mb-2 inline-block text-xs sm:text-sm md:text-base">
                       ← Back to Sales Performance
-                    </a>
+                    </Link>
                     <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-white">
                       Sales Performance Details
                     </h1>

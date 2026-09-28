@@ -1,35 +1,20 @@
 import express from 'express';
 const router = express.Router();
 import { createOpportunity, getOpportunities, assignOpportunity, updateOpportunity } from '../controllers/opportunity.controller.js';
-import authenticateToken from '../middleware/auth.middleware.js';
-import { isAdminOrManager, isSales } from '../middleware/roleCheck.js';
+import authenticateToken, { requirePermission, requireScope } from '../middleware/auth.middleware.js';
 
-/**
- * @route   POST /opportunities
- * @desc    Create a new opportunity
- * @access  Private
- */
-router.post('/', authenticateToken, createOpportunity);
+router.use(authenticateToken);
 
-/**
- * @route   GET /opportunities
- * @desc    Get opportunities based on user role
- * @access  Private
- */
-router.get('/', authenticateToken, getOpportunities);
+/** @route POST /opportunities */
+router.post('/', requirePermission('crm.opportunities.create'), createOpportunity);
 
-/**
- * @route   PATCH /opportunities/:opportunityId/assign
- * @desc    Assign an opportunity to a sales user
- * @access  Private (Admin and Manager only)
- */
-router.patch('/:opportunityId/assign', authenticateToken, isAdminOrManager, assignOpportunity);
+/** @route GET /opportunities */
+router.get('/', requirePermission('crm.opportunities.read'), getOpportunities);
 
-/**
- * @route   PUT /opportunities/:id
- * @desc    Update an opportunity
- * @access  Private
- */
-router.put('/:id', authenticateToken, updateOpportunity);
+/** @route PATCH /opportunities/:opportunityId/assign */
+router.patch('/:opportunityId/assign', requireScope('crm.opportunities.assign', 'organization'), assignOpportunity);
+
+/** @route PUT /opportunities/:id */
+router.put('/:id', requirePermission('crm.opportunities.update'), updateOpportunity);
 
 export default router;

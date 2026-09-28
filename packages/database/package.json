@@ -26,7 +26,6 @@
     "migrate:baseline": "node dist/cli/migrate.js baseline"
   },
   "dependencies": {
-    "dotenv": "^17.2.3",
     "pg": "^8.16.3"
   },
   "devDependencies": {

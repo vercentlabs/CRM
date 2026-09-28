@@ -1,6 +1,5 @@
 
 import express from 'express';
-import cors from 'cors';
 import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.routes.js';
 
@@ -28,11 +27,18 @@ import pool from './config/db.js';
 import { requestContextMiddleware } from './platform/request-context.js';
 import { createV1Router } from './platform/v1.js';
 import { errorHandler } from './platform/http/error-handler.js';
+import { corsMiddleware } from './platform/cors.js';
+import { env } from './platform/env.js';
 
 const app = express();
 
 // Do not advertise the framework in response headers
 app.disable('x-powered-by');
+
+// Behind a reverse proxy, trust it so req.ip (rate limiting, audit) is the client address
+if (env.TRUST_PROXY) {
+  app.set('trust proxy', /^\d+$/.test(env.TRUST_PROXY) ? Number(env.TRUST_PROXY) : env.TRUST_PROXY);
+}
 
 // Request ID + async request context (must run first)
 app.use(requestContextMiddleware);
@@ -40,8 +46,8 @@ app.use(requestContextMiddleware);
 // Enable JSON body parsing
 app.use(express.json());
 
-// Enable CORS
-app.use(cors());
+// CORS: credentials only for allow-listed origins (see platform/cors.ts)
+app.use(corsMiddleware);
 
 // Health check route (legacy, unversioned)
 app.use('/health', healthRoutes);

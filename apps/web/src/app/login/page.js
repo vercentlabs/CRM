@@ -51,24 +51,13 @@ export default function LoginPage() {
       const result = await apiLogin(email, password);
 
       if (result.success) {
-        // Update AuthContext with token and user data
-        const authResult = authLogin(result.token, result.user);
+        // The session lives in HttpOnly cookies; only the user profile is kept in state
+        const authResult = authLogin(result.user);
 
         if (authResult.success) {
-          // Login successful, redirect based on user role
-          const roleId = result.user.roleId;
-          
-          // Redirect based on role rules
-          if (roleId === 1) { // Admin
-            router.push('/dashboard');
-          } else if (roleId === 2) { // Manager
-            router.push('/dashboard');
-          } else if (roleId === 3) { // Sales
-            router.push('/leads');
-          } else {
-            // Default redirect if role is not recognized
-            router.push('/dashboard');
-          }
+          // Members limited to their own leads start on the leads page; others on the dashboard
+          const leadScope = result.user.permissions?.['crm.leads.read'];
+          router.push(leadScope === 'own' ? '/leads' : '/dashboard');
         } else {
           // Failed to update auth context
           setErrors({ form: 'Failed to save authentication data.' });

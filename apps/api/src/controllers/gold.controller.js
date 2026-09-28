@@ -4,7 +4,7 @@ import { fetchGoldRate } from '../services/gold.service.js';
  * Get current gold rates with calculated prices for different weights
  * @route   GET /gold/gold-rate
  * @desc    Get current gold rates for 22k and 24k gold in various weights
- * @access  Public
+ * @access  Any authenticated member (platform-wide market data)
  */
 const getGoldRate = async (req, res) => {
   try {
@@ -25,7 +25,6 @@ const getGoldRate = async (req, res) => {
 
     res.status(500).json({
       message: 'Error fetching gold rates',
-      error: error.message,
       source: 'none',
       warning: true
     });
@@ -36,24 +35,16 @@ const getGoldRate = async (req, res) => {
  * Force refresh gold rates
  * @route   POST /gold/refresh
  * @desc    Force refresh gold rates and update cache
- * @access  Admin
+ * @access  settings.organization.manage
  */
 const refreshGoldRate = async (req, res) => {
   try {
-    // Check if user is admin
-    if (!req.user || req.user.roleId !== 1) {
-      return res.status(403).json({
-        message: 'Access denied. Admin privileges required.'
-      });
-    }
-
+    // Authorization: route requires settings.organization.manage (see gold.routes.js)
     // Import the service to access cache variables
     const goldServiceModule = import('../services/gold.service.js');
     const goldService = (await goldServiceModule).default;
 
     // Temporarily clear cache to force fresh fetch
-    const originalCachedRate = goldService.cachedRate;
-    const originalLastFetchedAt = goldService.lastFetchedAt;
     goldService.setCachedRate(null);
     goldService.setLastFetchedAt(null);
 
@@ -76,7 +67,6 @@ const refreshGoldRate = async (req, res) => {
 
     res.status(500).json({
       message: 'Error refreshing gold rates',
-      error: error.message,
       source: 'none',
       warning: true
     });

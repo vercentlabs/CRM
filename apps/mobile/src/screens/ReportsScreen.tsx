@@ -13,12 +13,14 @@ import { useAuth } from '../context/AuthContext';
 import { ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES } from '../config/constants';
 import type { ReportsStackParamList } from '../navigation/ReportsStack';
 
+type ReportRoute = 'SalesPerformance' | 'LeadAging' | 'ConversionReport';
+
 type ReportCard = {
   title: string;
   description: string;
   category: string;
   icon: keyof typeof Feather.glyphMap;
-  route: keyof ReportsStackParamList;
+  route: ReportRoute;
   roles: number[];
 };
 
@@ -58,6 +60,19 @@ const ReportsScreen = () => {
   const styles = useMemo(() => createStyles(colors), [colors]);
   const { user } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<ReportsStackParamList>>();
+  const openReport = (route: ReportRoute) => {
+    switch (route) {
+      case 'SalesPerformance':
+        navigation.navigate('SalesPerformance');
+        break;
+      case 'LeadAging':
+        navigation.navigate('LeadAging');
+        break;
+      case 'ConversionReport':
+        navigation.navigate('ConversionReport');
+        break;
+    }
+  };
   const [loading] = useState(false);
   const [error] = useState<string | null>(null);
 
@@ -112,7 +127,7 @@ const ReportsScreen = () => {
                 <Pressable
                   key={report.title}
                   style={styles.reportCard}
-                  onPress={() => navigation.navigate(report.route)}
+                  onPress={() => openReport(report.route)}
                 >
                   <View style={styles.reportHeader}>
                     <View style={styles.reportIcon}>
@@ -130,7 +145,7 @@ const ReportsScreen = () => {
                     <Button
                       label="View Report"
                       size="sm"
-                      onPress={() => navigation.navigate(report.route)}
+                      onPress={() => openReport(report.route)}
                     />
                     <Text style={styles.reportHint}>Tap to open</Text>
                   </View>

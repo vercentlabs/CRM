@@ -20,7 +20,8 @@
     "format:check": "prettier --check packages apps/worker apps/api/src/platform apps/api/test docs *.json *.yaml *.md",
     "db:migrate": "turbo run build --filter=@crm/database && pnpm --filter @crm/database run migrate",
     "db:migrate:status": "turbo run build --filter=@crm/database && pnpm --filter @crm/database run migrate:status",
-    "db:migrate:baseline": "turbo run build --filter=@crm/database && pnpm --filter @crm/database run migrate:baseline"
+    "db:migrate:baseline": "turbo run build --filter=@crm/database && pnpm --filter @crm/database run migrate:baseline",
+    "org:bootstrap": "turbo run build --filter=@crm/api... && pnpm --filter @crm/api run org:bootstrap"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

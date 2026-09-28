@@ -17,26 +17,17 @@ const LeadsOverTimeChart = () => {
   useEffect(() => {
     const fetchLeadsOverTime = async () => {
       try {
-        const token = localStorage.getItem('token');
 
         // Fetch data for all three periods
         const [todayData, weekData, monthData] = await Promise.all([
-          axios.get('/reports/leads-over-time?period=today', {
-            headers: { Authorization: `Bearer ${token}` }
-          }),
-          axios.get('/reports/leads-over-time?period=week', {
-            headers: { Authorization: `Bearer ${token}` }
-          }),
-          axios.get('/reports/leads-over-time?period=month', {
-            headers: { Authorization: `Bearer ${token}` }
-          })
+          axios.get('/reports/leads-over-time?period=today'),
+          axios.get('/reports/leads-over-time?period=week'),
+          axios.get('/reports/leads-over-time?period=month')
         ]);
 
         // If no data for any period, fetch all leads and display them
         if (!todayData.data.length && !weekData.data.length && !monthData.data.length) {
-          const allLeads = await axios.get('/leads', {
-            headers: { Authorization: `Bearer ${token}` }
-          });
+          const allLeads = await axios.get('/leads');
 
           // Group leads by date
           const leadsByDate = {};

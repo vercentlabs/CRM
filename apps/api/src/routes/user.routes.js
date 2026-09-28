@@ -1,115 +1,70 @@
 import express from 'express';
 const router = express.Router();
 import { getCurrentUser, getAllUsers, createUser, updateUser, toggleUserStatus, forgotPassword, resetPassword, verifyResetToken } from '../controllers/user.controller.js';
-import authenticateToken from '../middleware/auth.middleware.js';
-import { checkRoles } from '../middleware/roleCheck.js';
+import authenticateToken, { requirePermission } from '../middleware/auth.middleware.js';
+import { createRateLimiter, emailKey } from '../platform/rate-limit.js';
+import { env } from '../platform/env.js';
 
-/**
- * @route   GET /users/me
- * @desc    Get the current user's profile
- * @access  Private
- */
+const passwordResetLimiter = createRateLimiter({
+  name: 'password-reset',
+  max: env.AUTH_RATE_LIMIT_MAX,
+  windowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
+  key: emailKey
+});
+
+/** @route GET /users/me */
 router.get('/me', authenticateToken, getCurrentUser);
 
-/**
- * @route   GET /users
- * @desc    Get all users
- * @access  Private (Admin and Manager only)
- */
-router.get('/', authenticateToken, checkRoles([1, 2]), getAllUsers);
+/** @route GET /users (members of the active organization) */
+router.get('/', authenticateToken, requirePermission('settings.users.read'), getAllUsers);
+
+/** @route POST /users (add a member) */
+router.post('/', authenticateToken, requirePermission('settings.users.manage'), createUser);
+
+/** @route PUT /users/:id */
+router.put('/:id', authenticateToken, requirePermission('settings.users.manage'), updateUser);
+
+/** @route PATCH /users/:id/status (membership active ⇄ suspended) */
+router.patch('/:id/status', authenticateToken, requirePermission('settings.users.manage'), toggleUserStatus);
+
+// Password reset endpoints (public, rate limited per IP + email)
+router.post('/forgot-password', passwordResetLimiter, forgotPassword);
+router.post('/reset-password', passwordResetLimiter, resetPassword);
+router.post('/verify-reset-token', passwordResetLimiter, verifyResetToken);
 
 /**
- * @route   POST /users
- * @desc    Create a new user
- * @access  Private (Admin only)
+ * SMTP diagnostics. Previously public and leaking error details; now limited
+ * to organization administrators and returning only a boolean outcome.
+ * @route   POST /users/verify-email
  */
-router.post('/', authenticateToken, checkRoles([1]), createUser);
-
-/**
- * @route   PUT /users/:id
- * @desc    Update a user
- * @access  Private (Admin only)
- */
-router.put('/:id', authenticateToken, checkRoles([1]), updateUser);
-
-/**
- * @route   PATCH /users/:id/status
- * @desc    Toggle user active/inactive status
- * @access  Private (Admin only)
- */
-router.patch('/:id/status', authenticateToken, checkRoles([1]), toggleUserStatus);
-
-// Password reset endpoints (public)
-router.post('/forgot-password', forgotPassword);
-router.post('/reset-password', resetPassword);
-router.post('/verify-reset-token', verifyResetToken);
-
-// Email verification endpoint (public for testing)
-router.post('/verify-email', async (req, res) => {
-  try {
-    const emailService = (await import('../services/email.service.js')).default;
-    const isValid = await emailService.verifyEmailConfig();
-    
-    if (isValid) {
-      return res.status(200).json({
-        success: true,
-        message: 'Email configuration is valid'
-      });
-    } else {
-      return res.status(500).json({
-        success: false,
-        message: 'Email configuration is invalid'
-      });
-    }
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
-  }
+router.post('/verify-email', authenticateToken, requirePermission('settings.organization.manage'), async (req, res) => {
+  const emailService = (await import('../services/email.service.js')).default;
+  const isValid = await emailService.verifyEmailConfig();
+  res.status(isValid ? 200 : 503).json({
+    success: isValid,
+    message: isValid ? 'Email configuration is valid' : 'Email configuration is invalid'
+  });
 });
 
 /**
+ * Send a test email (defaults to the administrator's own address).
  * @route   POST /users/test-email
- * @desc    Send a test email
- * @access  Private (Admin only)
  */
-router.post('/test-email', authenticateToken, checkRoles([1]), async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email is required'
-      });
-    }
-
-    // Import email service
-    const emailService = (await import('../services/email.service.js')).default;
-
-    // Send test email
-    const emailSent = await emailService.sendTestEmail(email);
-
-    if (emailSent) {
-      return res.status(200).json({
-        success: true,
-        message: 'Test email sent successfully'
-      });
-    } else {
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to send test email'
-      });
-    }
-  } catch (error) {
-    res.status(500).json({
+router.post('/test-email', authenticateToken, requirePermission('settings.organization.manage'), async (req, res) => {
+  const email = req.body?.email || req.auth.email;
+  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Email is required'
     });
   }
+
+  const emailService = (await import('../services/email.service.js')).default;
+  const emailSent = await emailService.sendTestEmail(email);
+  res.status(emailSent ? 200 : 503).json({
+    success: emailSent,
+    message: emailSent ? 'Test email sent successfully' : 'Failed to send test email'
+  });
 });
 
 export default router;

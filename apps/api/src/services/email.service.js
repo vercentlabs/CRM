@@ -1,15 +1,9 @@
 
 import nodemailer from 'nodemailer';
 
-// Create a transporter object using SMTP transport
+// Create a transporter object using SMTP transport.
+// Configuration values (and especially credentials) are never logged.
 const createTransporter = () => {
-  // Use environment variables for email configuration
-  console.log('Creating transporter with config:');
-  console.log('Host:', process.env.EMAIL_HOST || 'smtp.gmail.com');
-  console.log('Port:', process.env.EMAIL_PORT || 587);
-  console.log('Secure:', process.env.EMAIL_SECURE === 'true');
-  console.log('User:', process.env.EMAIL_USER);
-  
   return nodemailer.createTransport({
     host: process.env.EMAIL_HOST || 'smtp.gmail.com',
     port: process.env.EMAIL_PORT || 587,
@@ -21,40 +15,41 @@ const createTransporter = () => {
   });
 };
 
+const describeError = (error) => (error instanceof Error ? error.message : String(error));
+
 // Verify email configuration
 const verifyEmailConfig = async () => {
   try {
-    console.log('Verifying email configuration...');
     const transporter = createTransporter();
     await transporter.verify();
-    console.log('Email configuration verified successfully');
     return true;
   } catch (error) {
-    console.error('Email configuration verification failed:', error);
+    console.error('Email configuration verification failed:', describeError(error));
     return false;
   }
 };
+
+/** Builds the reset link. Exported for tests; the URL contains a live token and must never be logged. */
+export const buildResetUrl = (baseUrl, resetToken) =>
+  `${String(baseUrl).replace(/\/+$/, '')}/reset-password?token=${encodeURIComponent(resetToken)}`;
 
 /**
  * Send password reset email
  * @param {string} to - Recipient email address
  * @param {string} resetToken - Password reset token
  * @param {string} baseUrl - Base URL of the application
- * @returns {Promise<boolean>} - Success status
+ * @returns {Promise<boolean>} - Success status (never throws)
  */
 const sendPasswordResetEmail = async (to, resetToken, baseUrl) => {
+  // Built outside the try block: the pre-Phase-2 catch block referenced it out
+  // of scope (ReferenceError) and logged the token-bearing URL.
+  const resetUrl = buildResetUrl(baseUrl, resetToken);
   try {
-    console.log('Creating email transporter...');
     const transporter = createTransporter();
-    console.log('Email transporter created successfully');
 
-    // Create reset URL
-    const resetUrl = `${baseUrl}/reset-password?token=${resetToken}`;
-
-    // Email content
     const mailOptions = {
       from: process.env.EMAIL_FROM || '"CRM System" <noreply@crm.com>',
-      to: to,
+      to,
       subject: 'Password Reset Request',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -73,16 +68,10 @@ const sendPasswordResetEmail = async (to, resetToken, baseUrl) => {
       `
     };
 
-    // Send the email
-    console.log('Sending email to:', to);
     await transporter.sendMail(mailOptions);
-    console.log('Email sent successfully to:', to);
     return true;
   } catch (error) {
-    console.error('Error sending password reset email:');
-    console.error('Error details:', error);
-    console.error('Recipient:', to);
-    console.error('Reset URL:', resetUrl);
+    console.error('Error sending password reset email:', describeError(error));
     return false;
   }
 };
@@ -98,7 +87,7 @@ const sendTestEmail = async (to) => {
 
     const mailOptions = {
       from: process.env.EMAIL_FROM || '"CRM System" <noreply@crm.com>',
-      to: to,
+      to,
       subject: 'Test Email',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -113,7 +102,7 @@ const sendTestEmail = async (to) => {
     await transporter.sendMail(mailOptions);
     return true;
   } catch (error) {
-    console.error('Error sending test email:', error);
+    console.error('Error sending test email:', describeError(error));
     return false;
   }
 };

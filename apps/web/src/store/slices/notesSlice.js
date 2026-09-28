@@ -1,40 +1,27 @@
 
 import { createSlice, createAsyncThunk, createSelector } from '@reduxjs/toolkit';
+import api from '@/lib/api';
 
-// Async thunks
+// Async thunks (use the shared cookie-session API client; no tokens in JS)
+const failure = (error, fallback) =>
+  error?.response?.data?.error?.message || error?.response?.data?.message || fallback;
+
 export const fetchNotes = createAsyncThunk(
   'notes/fetchNotes',
   async ({ page = 1, pageSize = 20, filters = {} }, { rejectWithValue }) => {
     try {
       // Filter out null/empty values
       const cleanFilters = Object.fromEntries(
-        Object.entries(filters).filter(([_, value]) => 
-          value !== null && value !== undefined && value !== '' && 
+        Object.entries(filters).filter(([, value]) =>
+          value !== null && value !== undefined && value !== '' &&
           (Array.isArray(value) ? value.length > 0 : true)
         )
       );
-      
-      const params = new URLSearchParams({
-        page,
-        pageSize,
-        ...cleanFilters
-      });
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000'}/notes?${params}`, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('token') : ''}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch notes');
-      }
-
-      const data = await response.json();
-      return data;
+      const response = await api.get('/notes', { params: { page, pageSize, ...cleanFilters } });
+      return response.data;
     } catch (error) {
-      return rejectWithValue(error.message);
+      return rejectWithValue(failure(error, 'Failed to fetch notes'));
     }
   }
 );
@@ -43,23 +30,10 @@ export const createNoteThunk = createAsyncThunk(
   'notes/createNote',
   async (noteData, { rejectWithValue }) => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000'}/notes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('token') : ''}`
-        },
-        body: JSON.stringify(noteData)
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to create note');
-      }
-
-      const data = await response.json();
-      return data.note || data;
+      const response = await api.post('/notes', noteData);
+      return response.data.note || response.data;
     } catch (error) {
-      return rejectWithValue(error.message);
+      return rejectWithValue(failure(error, 'Failed to create note'));
     }
   }
 );
@@ -68,23 +42,10 @@ export const updateNoteThunk = createAsyncThunk(
   'notes/updateNote',
   async ({ id, ...noteData }, { rejectWithValue }) => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000'}/notes/${id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('token') : ''}`
-        },
-        body: JSON.stringify(noteData)
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to update note');
-      }
-
-      const data = await response.json();
-      return data.note || data;
+      const response = await api.put(`/notes/${id}`, noteData);
+      return response.data.note || response.data;
     } catch (error) {
-      return rejectWithValue(error.message);
+      return rejectWithValue(failure(error, 'Failed to update note'));
     }
   }
 );
@@ -93,21 +54,10 @@ export const deleteNoteThunk = createAsyncThunk(
   'notes/deleteNote',
   async (id, { rejectWithValue }) => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5000'}/notes/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('token') : ''}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete note');
-      }
-
+      await api.delete(`/notes/${id}`);
       return id;
     } catch (error) {
-      return rejectWithValue(error.message);
+      return rejectWithValue(failure(error, 'Failed to delete note'));
     }
   }
 );

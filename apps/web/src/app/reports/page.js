@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import AppLayout from '@/components/layout/AppLayout';
@@ -48,24 +48,18 @@ const REPORT_CARDS = [
 ];
 
 const ReportsPage = () => {
-  const [reports, setReports] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const { user } = useAuth();
 
-  const fetchReports = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    const filteredReports = user?.roleId === ROLE_SALES
+  // Report cards are static; the list is derived from the user (UI hint only, the API enforces access)
+  const reports = useMemo(
+    () => (user?.roleId === ROLE_SALES
       ? REPORT_CARDS.filter(report => report.allowedRoles?.includes(ROLE_SALES))
-      : REPORT_CARDS;
-    setReports(filteredReports);
-    setLoading(false);
-  }, [user?.roleId]);
-
-  useEffect(() => {
-    fetchReports();
-  }, [fetchReports]);
+      : REPORT_CARDS),
+    [user?.roleId]
+  );
+  const loading = false;
+  const error = null;
+  const fetchReports = useCallback(() => {}, []);
 
   return (
     <ProtectedRoute roles={[ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES]}>

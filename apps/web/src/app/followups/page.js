@@ -41,7 +41,7 @@ const FollowUpsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [token, user]);
+  }, [user]);
 
   useEffect(() => {
     if (token) {

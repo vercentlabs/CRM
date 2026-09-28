@@ -1,26 +1,17 @@
 import express from 'express';
 import { getSettings, updateSettings } from '../controllers/settings.controller.js';
-import authenticateToken from '../middleware/auth.middleware.js';
-import checkRole from '../middleware/role.middleware.js';
+import authenticateToken, { requirePermission } from '../middleware/auth.middleware.js';
 
 const router = express.Router();
 
-// All settings routes require authentication and admin role
+// Organization settings (tenant-scoped): authenticated → member → settings.organization.manage
 router.use(authenticateToken);
-router.use(checkRole([1]));
+router.use(requirePermission('settings.organization.manage'));
 
-/**
- * @route   GET /settings
- * @desc    Get all system settings
- * @access  Private (Admin only)
- */
+/** @route GET /settings */
 router.get('/', getSettings);
 
-/**
- * @route   PATCH /settings
- * @desc    Update system settings
- * @access  Private (Admin only)
- */
+/** @route PATCH /settings */
 router.patch('/', updateSettings);
 
 export default router;

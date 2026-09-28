@@ -12,6 +12,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 export const useInfiniteScroll = (callback, options = {}) => {
   const { threshold = 100, enabled = true } = options;
   const [isNearBottom, setIsNearBottom] = useState(false);
+  const [prevEnabled, setPrevEnabled] = useState(enabled);
+
+  // Reset near-bottom state when scrolling gets disabled (adjusted during render, not in an effect)
+  if (enabled !== prevEnabled) {
+    setPrevEnabled(enabled);
+    if (!enabled) setIsNearBottom(false);
+  }
   const observerRef = useRef(null);
   const callbackRef = useRef(callback);
 
@@ -47,12 +54,6 @@ export const useInfiniteScroll = (callback, options = {}) => {
     };
   }, [handleObserver, threshold, enabled]);
 
-  // Reset near bottom state when enabled changes
-  useEffect(() => {
-    if (!enabled) {
-      setIsNearBottom(false);
-    }
-  }, [enabled]);
 
   return {
     observerRef,

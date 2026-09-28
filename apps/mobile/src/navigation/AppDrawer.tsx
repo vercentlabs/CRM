@@ -57,7 +57,13 @@ const AppDrawer = () => {
   const hasRole = (roles?: number[]) =>
     !roles || roles.length === 0 || (roleId ? roles.includes(roleId) : false);
 
-  const screens = [
+  type DrawerScreenDef = {
+    name: keyof DrawerParamList;
+    component: React.ComponentType<object>;
+    roles?: readonly number[];
+  };
+
+  const screens: DrawerScreenDef[] = [
     { name: 'Tabs', component: AppTabs, roles: [ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES] },
     { name: 'AIAgent', component: AIAgentScreen, roles: [ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES] },
     { name: 'Customers', component: CustomersStack, roles: [ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES] },
@@ -77,7 +83,7 @@ const AppDrawer = () => {
     { name: 'Admin', component: AdminScreen, roles: [ROLE_ADMIN] },
     { name: 'Profile', component: ProfileScreen },
     { name: 'ChangePassword', component: ChangePasswordScreen }
-  ] as const;
+  ];
 
   return (
     <Drawer.Navigator
@@ -88,14 +94,15 @@ const AppDrawer = () => {
           backgroundColor: colors.appSidebar,
           width: 280
         },
-        sceneContainerStyle: {
+        // React Navigation 7 renamed sceneContainerStyle → sceneStyle (the old key was ignored)
+        sceneStyle: {
           backgroundColor: colors.appShell
         }
       }}
       drawerContent={(props) => <DrawerContent {...props} />}
     >
       {screens
-        .filter((screen) => hasRole(screen.roles as number[] | undefined))
+        .filter((screen) => hasRole(screen.roles ? [...screen.roles] : undefined))
         .map((screen) => (
           <Drawer.Screen
             key={screen.name}

@@ -1,23 +1,38 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
+import type { GrantMap } from '@crm/permissions';
 import { REQUEST_ID_HEADER } from '@crm/types';
 import type { NextFunction, Request, Response } from 'express';
 
-/** Identity as established by the legacy JWT middleware (`req.user`). */
+/** Identity kept for legacy controllers (`req.user`). `roleId` is display-only. */
 export interface ContextUser {
   userId: number;
-  roleId: number;
+  roleId: number | null;
 }
 
 /**
- * Per-request state available anywhere in the call chain without threading `req`.
- * Phase 2 adds `organizationId`, `membershipId` and `permissions` once tenancy exists;
- * they are intentionally absent until then rather than faked.
+ * Verified tenant/auth identity. Every field was loaded from the database for
+ * this request (session → user → active membership → role → grants); nothing
+ * here comes from client-supplied claims alone.
  */
+export interface TenantAuth {
+  userId: number;
+  sessionId: string;
+  organizationId: number;
+  organizationPublicId: string;
+  membershipId: number;
+  roleKey: string;
+  permissions: GrantMap;
+}
+
 export interface RequestContext {
   requestId: string;
   startedAt: number;
   user?: ContextUser;
+  auth?: TenantAuth;
+  /** Source IP and user agent, captured once for audit logging. */
+  ip?: string | undefined;
+  userAgent?: string | undefined;
 }
 
 const storage = new AsyncLocalStorage<RequestContext>();
@@ -42,6 +57,13 @@ export function setContextUser(user: ContextUser): void {
   if (context) context.user = user;
 }
 
+export function setContextAuth(auth: TenantAuth): void {
+  const context = storage.getStore();
+  if (!context) return;
+  context.auth = auth;
+  context.user = { userId: auth.userId, roleId: context.user?.roleId ?? null };
+}
+
 export function runWithRequestContext<T>(context: RequestContext, fn: () => T): T {
   return storage.run(context, fn);
 }
@@ -60,5 +82,8 @@ export function requestContextMiddleware(req: Request, res: Response, next: Next
   const requestId = resolveRequestId(req.get(REQUEST_ID_HEADER));
   req.requestId = requestId;
   res.setHeader(REQUEST_ID_HEADER, requestId);
-  storage.run({ requestId, startedAt: Date.now() }, next);
+  storage.run(
+    { requestId, startedAt: Date.now(), ip: req.ip, userAgent: req.get('user-agent') },
+    next,
+  );
 }

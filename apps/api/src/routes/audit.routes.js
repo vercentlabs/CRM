@@ -1,14 +1,10 @@
 import express from 'express';
-const router = express.Router();
-import authenticateToken from '../middleware/auth.middleware.js';
-import { checkRoles } from '../middleware/roleCheck.js';
 import { getAuditLogs } from '../controllers/audit.controller.js';
+import authenticateToken, { requirePermission } from '../middleware/auth.middleware.js';
 
-/**
- * @route   GET /
- * @desc    Get audit logs with pagination (admin only)
- * @access  Private (Admin only)
- */
-router.get('/', authenticateToken, checkRoles([1]), getAuditLogs);
+const router = express.Router();
+
+/** @route GET /audit (the organization's own audit log) */
+router.get('/', authenticateToken, requirePermission('settings.audit.read'), getAuditLogs);
 
 export default router;

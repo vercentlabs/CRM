@@ -26,13 +26,13 @@ type CalendarEvent = {
   event_type?: string | null;
 };
 
-const priorityLabels = {
+const priorityLabels: Record<string, { bg: string; text: string }> = {
   high: { bg: 'rgba(248, 113, 113, 0.2)', text: '#f87171' },
   medium: { bg: 'rgba(245, 158, 11, 0.2)', text: '#f59e0b' },
   low: { bg: 'rgba(34, 197, 94, 0.2)', text: '#22c55e' }
 };
 
-const statusLabels = {
+const statusLabels: Record<string, { bg: string; text: string }> = {
   completed: { bg: 'rgba(34, 197, 94, 0.2)', text: '#22c55e' },
   in_progress: { bg: 'rgba(59, 130, 246, 0.2)', text: '#60a5fa' },
   cancelled: { bg: 'rgba(148, 163, 184, 0.2)', text: '#cbd5f5' },

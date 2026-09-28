@@ -43,11 +43,6 @@ export default defineConfig([
       'no-case-declarations': 'warn',
       'no-prototype-builtins': 'warn',
       'no-async-promise-executor': 'warn',
-      // Known pre-existing defects, tracked in docs/architecture/CURRENT_SYSTEM.md (debt #8)
-      // and fixed with tests in Phase 3 rather than silently changing behaviour here.
-      'no-const-assign': 'warn',
-      'no-undef': 'warn',
-      '@typescript-eslint/no-require-imports': 'warn',
     },
   },
 ]);

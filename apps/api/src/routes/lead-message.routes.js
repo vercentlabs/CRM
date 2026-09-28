@@ -1,37 +1,20 @@
-
 import express from 'express';
 const router = express.Router();
 import { sendLeadMessage, getLeadMessages, updateLeadMessageStatus, sendBulkLeadMessages } from '../controllers/lead-message.controller.js';
-import authenticateToken from '../middleware/auth.middleware.js';
+import authenticateToken, { requirePermission } from '../middleware/auth.middleware.js';
 
-/**
- * @route   POST /api/lead-messages/send
- * @desc    Send a message to a lead
- * @access  Private
- */
-router.post('/send', authenticateToken, sendLeadMessage);
+router.use(authenticateToken);
 
-/**
- * @route   GET /api/lead-messages
- * @desc    Get lead messages based on user role
- * @access  Private
- */
-router.get('/', authenticateToken, getLeadMessages);
+/** @route POST /api/lead-messages/send */
+router.post('/send', requirePermission('crm.messages.send'), sendLeadMessage);
 
-/**
- * @route   PUT /api/lead-messages/:id/status
- * @desc    Update lead message delivery status
- * @access  Private
- * Previously unauthenticated, which let anyone rewrite any message's status.
- * No external webhook calls this route; the web client already sends a token.
- */
-router.put('/:id/status', authenticateToken, updateLeadMessageStatus);
+/** @route GET /api/lead-messages */
+router.get('/', requirePermission('crm.messages.read'), getLeadMessages);
 
-/**
- * @route   POST /api/lead-messages/bulk
- * @desc    Send bulk messages to multiple leads
- * @access  Private
- */
-router.post('/bulk', authenticateToken, sendBulkLeadMessages);
+/** @route PUT /api/lead-messages/:id/status (authenticated since Phase 1; tenant + scope bound since Phase 2) */
+router.put('/:id/status', requirePermission('crm.messages.update'), updateLeadMessageStatus);
+
+/** @route POST /api/lead-messages/bulk */
+router.post('/bulk', requirePermission('crm.messages.send'), sendBulkLeadMessages);
 
 export default router;

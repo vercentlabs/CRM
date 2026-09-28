@@ -15,12 +15,7 @@ const SalesExecutiveTable = () => {
   useEffect(() => {
     const fetchSalesPerformance = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const response = await axios.get('/reports/sales-performance', {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        const response = await axios.get('/reports/sales-performance');
 
         // Handle response data - it might be wrapped in an object or be an array directly
         let data = response.data;

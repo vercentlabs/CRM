@@ -22,11 +22,7 @@ const ExecutivesLocationPage = () => {
   // Fetch executives locations from API
   const fetchExecutivesLocations = useCallback(async () => {
     try {
-      const response = await axios.get('/sales-locations/executives', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await axios.get('/sales-locations/executives');
 
       if (response.data.success) {
         setExecutives(response.data.executives || []);
@@ -47,7 +43,7 @@ const ExecutivesLocationPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   // Initial fetch
   useEffect(() => {

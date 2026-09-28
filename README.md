@@ -13,7 +13,7 @@ packages/
   validation/   shared zod schemas               api-client/   shared fetch client
   permissions/  permission names + role ids      database/     pg pool, health, migrations
 infrastructure/docker/   api / web / worker Dockerfiles (build from repo root)
-docs/architecture/       CURRENT_SYSTEM, TARGET_SYSTEM, GUARDRAILS, MIGRATION_TRACKER
+docs/architecture/       CURRENT_SYSTEM, TARGET_SYSTEM, TENANCY_AND_AUTH, GUARDRAILS, MIGRATION_TRACKER
 ```
 
 ## Getting started
@@ -25,6 +25,8 @@ pnpm install
 cp apps/api/.env.example apps/api/.env          # fill in DATABASE_URL, JWT_SECRET, ...
 cp apps/web/.env.example apps/web/.env.local
 pnpm db:migrate            # existing DB created before Phase 1? run `pnpm db:migrate:baseline` once first
+# Fresh database only: create the first organization and admin (credentials from env)
+BOOTSTRAP_ORG_NAME="Acme" BOOTSTRAP_ADMIN_EMAIL=you@acme.test BOOTSTRAP_ADMIN_PASSWORD="<12+ chars>" pnpm org:bootstrap
 pnpm dev                   # api + web
 pnpm dev:mobile            # Expo dev server
 ```
@@ -42,4 +44,4 @@ Set `TEST_DATABASE_URL` to a disposable Postgres to enable the database integrat
 
 Health checks are at `GET /api/v1/health/live` and `GET /api/v1/health/ready`. New endpoints go under `/api/v1` and use the envelopes described in `docs/architecture/TARGET_SYSTEM.md`. The legacy unversioned routes keep working until Phase 3 migrates their callers.
 
-Read `docs/architecture/GUARDRAILS.md` before adding code.
+Read `docs/architecture/GUARDRAILS.md` and `docs/architecture/TENANCY_AND_AUTH.md` before adding code. Every query on tenant data must be bounded by the verified organization (`tenantOf(req)`).

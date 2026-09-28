@@ -1,36 +1,15 @@
 import pool from '../config/db.js';
-import { validateWebhookSignature, generateCallXML } from '../services/plivo.service.js';
+import { generateCallXML } from '../services/plivo.service.js';
 
 /**
  * Handle Plivo answer webhook
  * @route   POST /api/plivo/webhook/answer
  * @desc    Handle incoming Plivo call answer events
- * @access  Public (but signature validated)
+ * @access  Plivo only (X-Plivo-Signature-V3 verified by middleware)
  */
 const handleAnswer = async (req, res) => {
   try {
-    // Validate Plivo signature
-    const signature = req.header('X-Plivo-Signature-V3');
-    const nonce = req.header('X-Plivo-Signature-V3-Nonce');
-
-    if (!signature || !nonce) {
-      console.error('Missing Plivo signature headers');
-      return res.status(403).json({ message: 'Invalid request' });
-    }
-
-    const isValid = validateWebhookSignature(
-      signature,
-      nonce,
-      req.originalUrl,
-      req.method,
-      req.body
-    );
-
-    if (!isValid) {
-      console.error('Invalid Plivo signature');
-      return res.status(403).json({ message: 'Invalid signature' });
-    }
-
+    // Signature already verified by verifyPlivoSignature (see plivo.routes.js)
     const { CallUUID, From, To, Direction, CallStatus } = req.body;
     console.log('Plivo answer webhook:', { CallUUID, From, To, Direction, CallStatus });
 
@@ -69,32 +48,11 @@ const handleAnswer = async (req, res) => {
  * Handle Plivo recording webhook
  * @route   POST /api/plivo/webhook/recording
  * @desc    Handle Plivo recording callbacks
- * @access  Public (but signature validated)
+ * @access  Plivo only (X-Plivo-Signature-V3 verified by middleware)
  */
 const handleRecording = async (req, res) => {
   try {
-    // Validate Plivo signature
-    const signature = req.header('X-Plivo-Signature-V3');
-    const nonce = req.header('X-Plivo-Signature-V3-Nonce');
-
-    if (!signature || !nonce) {
-      console.error('Missing Plivo signature headers');
-      return res.status(403).json({ message: 'Invalid request' });
-    }
-
-    const isValid = validateWebhookSignature(
-      signature,
-      nonce,
-      req.originalUrl,
-      req.method,
-      req.body
-    );
-
-    if (!isValid) {
-      console.error('Invalid Plivo signature');
-      return res.status(403).json({ message: 'Invalid signature' });
-    }
-
+    // Signature already verified by verifyPlivoSignature (see plivo.routes.js)
     const { CallUUID, RecordingUrl, RecordingDuration, RecordingID } = req.body;
     console.log('Plivo recording webhook:', { CallUUID, RecordingUrl, RecordingDuration, RecordingID });
 
@@ -125,32 +83,11 @@ const handleRecording = async (req, res) => {
  * Handle Plivo call status webhook
  * @route   POST /api/plivo/webhook/status
  * @desc    Handle Plivo call status updates
- * @access  Public (but signature validated)
+ * @access  Plivo only (X-Plivo-Signature-V3 verified by middleware)
  */
 const handleCallStatus = async (req, res) => {
   try {
-    // Validate Plivo signature
-    const signature = req.header('X-Plivo-Signature-V3');
-    const nonce = req.header('X-Plivo-Signature-V3-Nonce');
-
-    if (!signature || !nonce) {
-      console.error('Missing Plivo signature headers');
-      return res.status(403).json({ message: 'Invalid request' });
-    }
-
-    const isValid = validateWebhookSignature(
-      signature,
-      nonce,
-      req.originalUrl,
-      req.method,
-      req.body
-    );
-
-    if (!isValid) {
-      console.error('Invalid Plivo signature');
-      return res.status(403).json({ message: 'Invalid signature' });
-    }
-
+    // Signature already verified by verifyPlivoSignature (see plivo.routes.js)
     const { CallUUID, CallStatus, CallDuration, HangupCause } = req.body;
     console.log('Plivo call status webhook:', { CallUUID, CallStatus, CallDuration, HangupCause });
 

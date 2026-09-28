@@ -1,21 +1,14 @@
 import express from 'express';
 const router = express.Router();
 import { getGoldRate, refreshGoldRate } from '../controllers/gold.controller.js';
-import authenticateToken from '../middleware/auth.middleware.js';
-import { checkRoles } from '../middleware/roleCheck.js';
+import authenticateToken, { requirePermission } from '../middleware/auth.middleware.js';
 
-/**
- * @route   GET /gold/gold-rate
- * @desc    Get current gold rates for 22k and 24k gold in various weights
- * @access  Private (all roles)
- */
+// The gold rate is platform-wide market data (not tenant data); any member may read it.
+
+/** @route GET /gold-rate */
 router.get('/gold-rate', authenticateToken, getGoldRate);
 
-/**
- * @route   POST /gold/refresh
- * @desc    Force refresh gold rates and update cache
- * @access  Admin only
- */
-router.post('/gold/refresh', authenticateToken, checkRoles([1]), refreshGoldRate);
+/** @route POST /gold/refresh */
+router.post('/gold/refresh', authenticateToken, requirePermission('settings.organization.manage'), refreshGoldRate);
 
 export default router;

@@ -76,17 +76,9 @@ const FollowupsTable = ({
 
       // If overdue, update to overdue status
       if (isOverdue) {
-        await axios.patch(`/followups/${followupId}/overdue`, {}, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
+        await axios.patch(`/followups/${followupId}/overdue`, {});
       } else {
-        await axios.patch(`/followups/${followupId}/complete`, {}, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
+        await axios.patch(`/followups/${followupId}/complete`, {});
       }
 
       // Call refresh function if provided

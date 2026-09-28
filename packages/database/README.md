@@ -33,12 +33,17 @@ This package handles PostgreSQL access for the API, the worker and tooling. Clie
 - **Fresh database:** `pnpm db:migrate` creates the full schema.
 - **Existing (pgAdmin-managed) database:** the runner detects the existing `users` table with no history and stops. Verify the schema matches the baseline, then run `pnpm db:migrate:baseline` once, then `pnpm db:migrate`.
 
-## Legacy
+## Shipped migrations
 
-`legacy/` keeps the old one-off scripts so nothing is lost. They are not wired into any command.
+| File                        | Purpose                                                                                                                           |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `0001_baseline_schema.sql`  | Pre-Phase-1 schema snapshot (unchanged)                                                                                           |
+| `0002_saas_identity.sql`    | Organizations, org-aware roles, permissions, role_permissions, memberships, sessions, and hashed refresh tokens                   |
+| `0003_tenant_ownership.sql` | `organization_id` on business tables, backfill into one legacy organization, NOT NULL, per-org uniques, composite FKs and indexes |
 
-- `init-db.js` **drops and recreates** the database from the baseline. Use it for local development only.
-- `insert-admin*.sql` and `fix-*.sql` are manual pgAdmin scripts. `insert-admin.sql` contains a real email address and the bcrypt hash of a default password; see the security notes in `docs/architecture/MIGRATION_TRACKER.md`.
+Tenancy rules are in `docs/architecture/TENANCY_AND_AUTH.md`. A fresh database has no organization: run `pnpm org:bootstrap` (env: `BOOTSTRAP_ORG_NAME`, `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD`).
+
+The pre-Phase-2 `legacy/` scripts (a destructive `init-db.js`, admin inserts containing a real email and password hash, and note "fix" scripts that moved rows across tenants) were removed in Phase 2. They remain only in git history.
 
 ## Tests
 

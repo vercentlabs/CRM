@@ -10,7 +10,9 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "org:bootstrap": "node dist/cli/bootstrap-organization.js",
+    "org:bootstrap:dev": "tsx src/cli/bootstrap-organization.ts"
   },
   "keywords": [],
   "author": "",
@@ -19,7 +21,9 @@
   "dependencies": {
     "@crm/config": "workspace:*",
     "@crm/database": "workspace:*",
+    "@crm/permissions": "workspace:*",
     "@crm/types": "workspace:*",
+    "@crm/validation": "workspace:*",
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
@@ -34,7 +38,10 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.19.0",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3",

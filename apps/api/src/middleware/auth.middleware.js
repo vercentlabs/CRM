@@ -1,45 +1,8 @@
-import jwt from 'jsonwebtoken';
-import { setContextUser } from '../platform/request-context.js';
+// Legacy routes keep importing `authenticateToken`; it is now the Phase 2
+// session-backed middleware (verified user + active membership + tenant context).
+// Pre-Phase-2 24h tokens carry no session and are rejected with 401.
+import { authenticate } from '../platform/auth/middleware.js';
 
-/**
- * Authentication middleware that verifies JWT tokens
- * Reads token from Authorization header (Bearer token)
- * Verifies token using JWT_SECRET
- * If invalid or missing → 401
- * Attaches user info to req.user
- * Calls next()
- */
-const authenticateToken = (req, res, next) => {
-  // Get the Authorization header
-  const authHeader = req.headers['authorization'];
+export { requirePermission, requireAnyPermission, requireScope } from '../platform/auth/middleware.js';
 
-  // Check if the Authorization header exists and has the Bearer token format
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'Access denied. No token provided.' });
-  }
-
-  // Extract the token from the header
-  const token = authHeader.split(' ')[1];
-
-  try {
-    // Verify the token using the JWT_SECRET
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    // Attach user info to the request object
-    req.user = {
-      userId: decoded.userId,
-      roleId: decoded.roleId
-    };
-
-    // Expose the identity to the async request context (logging, future tenancy)
-    setContextUser(req.user);
-
-    // Call the next middleware
-    next();
-  } catch (error) {
-    // If token is invalid or expired
-    return res.status(401).json({ message: 'Invalid token.' });
-  }
-};
-
-export default authenticateToken;
+export default authenticate;

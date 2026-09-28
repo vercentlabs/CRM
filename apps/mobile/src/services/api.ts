@@ -1,4 +1,4 @@
-import { getToken } from './authStorage';
+import { getRefreshToken, getToken, setSessionTokens } from './authStorage';
 import { getApiBaseUrl } from './apiBase';
 
 export type ApiEnvelope<T> = {
@@ -15,9 +15,12 @@ export type ApiError = {
   payload?: unknown;
 };
 
-type RequestOptions = Omit<RequestInit, 'body'> & {
+type RequestOptions = Omit<RequestInit, 'body' | 'headers'> & {
   body?: unknown;
+  headers?: Record<string, string>;
   timeoutMs?: number;
+  /** Internal: do not attempt a token refresh on 401 (auth endpoints, retries). */
+  skipAuthRefresh?: boolean;
 };
 
 type UnauthorizedHandler = () => void;
@@ -49,17 +52,56 @@ const parseResponseBody = async (response: Response) => {
   return response.text();
 };
 
-export const apiRequest = async <T>(
-  path: string,
-  options: RequestOptions = {}
-): Promise<T> => {
-  const { timeoutMs = 10000, headers, body, signal, ...rest } = options;
+const errorMessage = (payload: unknown) => {
+  if (payload && typeof payload === 'object') {
+    const error = (payload as { error?: unknown }).error;
+    if (error && typeof error === 'object' && 'message' in error) {
+      return String((error as { message?: string }).message);
+    }
+    if ('message' in payload) return String((payload as { message?: string }).message);
+  }
+  return 'Request failed';
+};
+
+type AuthTokens = { accessToken: string; refreshToken: string };
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+/**
+ * Exchanges the SecureStore refresh token for a new pair (rotation).
+ * Concurrent 401s share one refresh; a rejected refresh means the session is over.
+ */
+export const refreshSession = (): Promise<boolean> => {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const baseUrl = await getApiBaseUrl();
+      const refreshToken = await getRefreshToken(baseUrl);
+      if (!refreshToken) return false;
+      try {
+        const tokens = await apiRequest<AuthTokens>('/api/v1/auth/refresh', {
+          method: 'POST',
+          body: { refreshToken },
+          skipAuthRefresh: true
+        });
+        if (!tokens?.accessToken) return false;
+        await setSessionTokens(tokens, baseUrl);
+        return true;
+      } catch {
+        return false;
+      }
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+};
+
+const sendOnce = async <T>(path: string, options: RequestOptions, apiBaseUrl: string): Promise<{ response: Response; payload: unknown }> => {
+  const { timeoutMs = 10000, headers, body, signal, skipAuthRefresh: _skip, ...rest } = options;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  const apiBaseUrl = await getApiBaseUrl();
-
   try {
-    const token = await getToken();
+    const token = await getToken(apiBaseUrl);
     const requestHeaders: Record<string, string> = {
       Accept: 'application/json',
       ...(headers || {})
@@ -88,21 +130,36 @@ export const apiRequest = async <T>(
       signal: signal ?? controller.signal
     });
 
-    const payload = await parseResponseBody(response);
+    return { response, payload: await parseResponseBody(response) };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+export const apiRequest = async <T>(
+  path: string,
+  options: RequestOptions = {}
+): Promise<T> => {
+  const apiBaseUrl = await getApiBaseUrl();
+
+  try {
+    let { response, payload } = await sendOnce<T>(path, options, apiBaseUrl);
+
+    // Access tokens are short-lived: refresh once and retry before giving up.
+    if (response.status === 401 && !options.skipAuthRefresh) {
+      if (await refreshSession()) {
+        ({ response, payload } = await sendOnce<T>(path, { ...options, skipAuthRefresh: true }, apiBaseUrl));
+      }
+    }
 
     if (!response.ok) {
-      if (response.status === 401 && unauthorizedHandler) {
+      if (response.status === 401 && unauthorizedHandler && !path.startsWith('/api/v1/auth/')) {
         unauthorizedHandler();
       }
 
-      const message =
-        payload && typeof payload === 'object' && 'message' in payload
-          ? String((payload as { message?: string }).message)
-          : 'Request failed';
-
       throw {
         status: response.status,
-        message,
+        message: errorMessage(payload),
         payload
       } as ApiError;
     }
@@ -136,7 +193,5 @@ export const apiRequest = async <T>(
     }
 
     throw error;
-  } finally {
-    clearTimeout(timeoutId);
   }
 };

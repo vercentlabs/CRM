@@ -1,35 +1,20 @@
 import express from 'express';
 const router = express.Router();
 import { getCustomers, createCustomer, updateCustomer, deleteCustomer } from '../controllers/customer.controller.js';
-import authenticateToken from '../middleware/auth.middleware.js';
-import { checkRoles } from '../middleware/roleCheck.js';
+import authenticateToken, { requirePermission } from '../middleware/auth.middleware.js';
 
-/**
- * @route   GET /customers
- * @desc    Get all customers
- * @access  Private (Admin, Manager, and Sales)
- */
-router.get('/', authenticateToken, checkRoles([1, 2, 3]), getCustomers);
+router.use(authenticateToken);
 
-/**
- * @route   POST /customers
- * @desc    Create a new customer
- * @access  Private (Admin, Manager, and Sales)
- */
-router.post('/', authenticateToken, checkRoles([1, 2, 3]), createCustomer);
+/** @route GET /customers */
+router.get('/', requirePermission('crm.customers.read'), getCustomers);
 
-/**
- * @route   PUT /customers/:id
- * @desc    Update a customer
- * @access  Private (Admin, Manager, and Sales)
- */
-router.put('/:id', authenticateToken, checkRoles([1, 2, 3]), updateCustomer);
+/** @route POST /customers */
+router.post('/', requirePermission('crm.customers.create'), createCustomer);
 
-/**
- * @route   DELETE /customers/:id
- * @desc    Delete a customer
- * @access  Private (Admin only)
- */
-router.delete('/:id', authenticateToken, checkRoles([1]), deleteCustomer);
+/** @route PUT /customers/:id */
+router.put('/:id', requirePermission('crm.customers.update'), updateCustomer);
+
+/** @route DELETE /customers/:id */
+router.delete('/:id', requirePermission('crm.customers.delete'), deleteCustomer);
 
 export default router;

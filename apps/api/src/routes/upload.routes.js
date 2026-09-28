@@ -1,7 +1,7 @@
 import express from 'express';
 const router = express.Router();
 import { uploadChatAttachment } from '../controllers/upload.controller.js';
-import authenticateToken from '../middleware/auth.middleware.js';
+import authenticateToken, { requirePermission } from '../middleware/auth.middleware.js';
 import multer from 'multer';
 
 // Configure multer for file uploads
@@ -47,6 +47,6 @@ const upload = multer({
  * @desc    Upload a file for chat attachment
  * @access  Private
  */
-router.post('/chat-attachment', authenticateToken, upload.single('file'), uploadChatAttachment);
+router.post('/chat-attachment', authenticateToken, requirePermission('crm.chat.use'), upload.single('file'), uploadChatAttachment);
 
 export default router;

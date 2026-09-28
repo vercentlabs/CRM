@@ -7,7 +7,8 @@ import { useTheme } from '../../theme/ThemeProvider';
 type GradientTextProps = {
   children: React.ReactNode;
   style?: StyleProp<TextStyle>;
-  colors?: string[];
+  /** expo-linear-gradient requires at least two colors. */
+  colors?: readonly [string, string, ...string[]];
   start?: { x: number; y: number };
   end?: { x: number; y: number };
 };
@@ -20,7 +21,7 @@ const GradientText = ({
   end = { x: 1, y: 0 }
 }: GradientTextProps) => {
   const { theme } = useTheme();
-  const gradientColors = colors ?? [theme.colors.brand, theme.colors.brandSoft];
+  const gradientColors: readonly [string, string, ...string[]] = colors ?? [theme.colors.brand, theme.colors.brandSoft];
 
   return (
     <MaskedView

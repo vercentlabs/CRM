@@ -55,8 +55,7 @@ export const generateCallXML = (options = {}) => {
     targetNumber = null,
     record = false,
     recordActionUrl = null,
-    speakText = null,
-    hangupOnStar = false
+    speakText = null
   } = options;
 
   const response = new plivo.Response();
@@ -84,7 +83,7 @@ export const generateCallXML = (options = {}) => {
       response.addHangup();
       break;
 
-    case 'conference':
+    case 'conference': {
       const conference = response.addConference({
         enterSound: 'beep:1',
         exitSound: 'beep:2',
@@ -93,34 +92,10 @@ export const generateCallXML = (options = {}) => {
       });
       conference.addNumber(targetNumber);
       break;
+    }
   }
 
   return response.toXML();
-};
-
-/**
- * Validate Plivo webhook signature
- * @param {string} signature - X-Plivo-Signature-V3 header
- * @param {string} nonce - X-Plivo-Signature-V3-Nonce header
- * @param {string} uri - Request URI
- * @param {string} method - Request method (GET/POST)
- * @param {Object} body - Request body
- * @returns {boolean} - True if signature is valid
- */
-export const validateWebhookSignature = (signature, nonce, uri, method, body) => {
-  try {
-    return plivo.utils.validateSignatureV3(
-      process.env.PLIVO_AUTH_TOKEN,
-      signature,
-      nonce,
-      uri,
-      method,
-      body
-    );
-  } catch (error) {
-    console.error('Error validating Plivo signature:', error);
-    return false;
-  }
 };
 
 /**
@@ -200,7 +175,6 @@ export const deleteRecording = async (recordingId) => {
 export default {
   makeCall,
   generateCallXML,
-  validateWebhookSignature,
   getCallDetails,
   hangupCall,
   getRecording,

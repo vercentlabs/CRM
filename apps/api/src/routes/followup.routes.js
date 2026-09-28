@@ -2,41 +2,23 @@ import express from 'express';
 const router = express.Router();
 import { createFollowup } from '../controllers/lead.controller.js';
 import { getFollowups, getOverdueFollowups, completeFollowup, markFollowupOverdue } from '../controllers/followup.controller.js';
-import authenticateToken from '../middleware/auth.middleware.js';
+import authenticateToken, { requirePermission } from '../middleware/auth.middleware.js';
 
-/**
- * @route   POST /followups
- * @desc    Create a followup for a lead
- * @access  Private (role check inside controller)
- */
-router.post('/', authenticateToken, createFollowup);
+router.use(authenticateToken);
 
-/**
- * @route   GET /followups
- * @desc    Get followups based on user role
- * @access  Private
- */
-router.get('/', authenticateToken, getFollowups);
+/** @route POST /followups (expects /leads/:leadId/followups; kept for compatibility) */
+router.post('/', requirePermission('crm.followups.create'), createFollowup);
 
-/**
- * @route   GET /followups/overdue
- * @desc    Get overdue followups based on user role
- * @access  Private
- */
-router.get('/overdue', authenticateToken, getOverdueFollowups);
+/** @route GET /followups */
+router.get('/', requirePermission('crm.followups.read'), getFollowups);
 
-/**
- * @route   PATCH /followups/:id/complete
- * @desc    Mark a followup as completed
- * @access  Private (Sales only)
- */
-router.patch('/:id/complete', authenticateToken, completeFollowup);
+/** @route GET /followups/overdue */
+router.get('/overdue', requirePermission('crm.followups.read'), getOverdueFollowups);
 
-/**
- * @route   PATCH /followups/:id/overdue
- * @desc    Mark a followup as overdue
- * @access  Private (Sales only)
- */
-router.patch('/:id/overdue', authenticateToken, markFollowupOverdue);
+/** @route PATCH /followups/:id/complete */
+router.patch('/:id/complete', requirePermission('crm.followups.update'), completeFollowup);
+
+/** @route PATCH /followups/:id/overdue */
+router.patch('/:id/overdue', requirePermission('crm.followups.update'), markFollowupOverdue);
 
 export default router;

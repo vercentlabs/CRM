@@ -1,34 +1,20 @@
 import express from 'express';
 const router = express.Router();
 import { sendMessage, getMessages, updateMessageStatus, sendBulkMessage } from '../controllers/message.controller.js';
-import authenticateToken from '../middleware/auth.middleware.js';
+import authenticateToken, { requirePermission } from '../middleware/auth.middleware.js';
 
-/**
- * @route   POST /messages/send
- * @desc    Send a message to a lead
- * @access  Private
- */
-router.post('/send', authenticateToken, sendMessage);
+router.use(authenticateToken);
 
-/**
- * @route   GET /messages
- * @desc    Get messages based on user role
- * @access  Private
- */
-router.get('/', authenticateToken, getMessages);
+/** @route POST /messages/send */
+router.post('/send', requirePermission('crm.messages.send'), sendMessage);
 
-/**
- * @route   PUT /messages/:id/status
- * @desc    Update message delivery status
- * @access  Private
- */
-router.put('/:id/status', authenticateToken, updateMessageStatus);
+/** @route GET /messages */
+router.get('/', requirePermission('crm.messages.read'), getMessages);
 
-/**
- * @route   POST /messages/bulk
- * @desc    Send bulk messages to multiple leads
- * @access  Private
- */
-router.post('/bulk', authenticateToken, sendBulkMessage);
+/** @route PUT /messages/:id/status (authenticated since Phase 1; tenant + scope bound since Phase 2) */
+router.put('/:id/status', requirePermission('crm.messages.update'), updateMessageStatus);
+
+/** @route POST /messages/bulk */
+router.post('/bulk', requirePermission('crm.messages.send'), sendBulkMessage);
 
 export default router;

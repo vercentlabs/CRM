@@ -1,16 +1,24 @@
 import pool from '../config/db.js';
 import { withTransaction } from '../utils/dbTransaction.js';
 import { logAuditEvent } from '../utils/auditLogger.js';
+import { hasPermission, isActiveMember, parseId, scopeFor, serverError, tenantOf } from '../platform/tenancy.js';
+import { OWN_LEAD } from './lead.controller.js';
+
+/** Own scope: assigned to me, or unassigned and created by me. */
+const OWN_OPPORTUNITY = (alias, param) =>
+  `(${alias}.assigned_to = ${param} OR (${alias}.assigned_to IS NULL AND ${alias}.created_by = ${param}))`;
+
+const isOwnOpportunity = (opportunity, userId) =>
+  opportunity.assigned_to === userId || (opportunity.assigned_to === null && opportunity.created_by === userId);
 
 /**
  * Create a new opportunity
  * @route   POST /opportunities
- * @desc    Create a new opportunity with provided information
- * @access  Private
+ * @access  crm.opportunities.create; the lead must be visible to the caller
  */
 const createOpportunity = async (req, res) => {
   try {
-    // Extract all opportunity fields from request body
+    const { organizationId, userId } = tenantOf(req);
     const {
       lead_id,
       title,
@@ -22,10 +30,6 @@ const createOpportunity = async (req, res) => {
       assigned_to
     } = req.body;
 
-    // Get user information from the request
-    const { roleId: role, userId } = req.user;
-
-    // Validate required fields
     if (!lead_id || !title) {
       return res.status(400).json({
         success: false,
@@ -33,7 +37,6 @@ const createOpportunity = async (req, res) => {
       });
     }
 
-    // Validate title (must be a non-empty string)
     if (typeof title !== 'string' || title.trim() === '') {
       return res.status(400).json({
         success: false,
@@ -41,7 +44,6 @@ const createOpportunity = async (req, res) => {
       });
     }
 
-    // Validate stage if provided (must be a string and one of allowed values)
     const validStages = ['Prospecting', 'Qualification', 'Needs Analysis', 'Value Proposition', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost'];
     if (stage && (typeof stage !== 'string' || !validStages.includes(stage))) {
       return res.status(400).json({
@@ -50,7 +52,6 @@ const createOpportunity = async (req, res) => {
       });
     }
 
-    // Validate probability if provided (must be a number between 0 and 100)
     if (probability !== undefined && (isNaN(probability) || probability < 0 || probability > 100)) {
       return res.status(400).json({
         success: false,
@@ -58,27 +59,37 @@ const createOpportunity = async (req, res) => {
       });
     }
 
-    // Check role-based assignment rules
     let finalAssignedTo = null;
-
-    if (role === 3) { // Sales role
-      // For sales users, assigned_to must be null or same as userId
-      if (assigned_to && assigned_to !== userId) {
+    const requested = assigned_to === undefined || assigned_to === null || assigned_to === '' ? null : parseId(assigned_to);
+    if (scopeFor(req, 'crm.opportunities.create') !== 'organization') {
+      if (requested !== null && requested !== userId) {
         return res.status(403).json({
           success: false,
           message: 'Sales users can only assign opportunities to themselves'
         });
       }
-      finalAssignedTo = assigned_to || userId;
-    } else if (role === 1 || role === 2) { // Admin or Manager
-      // For admin or manager, allow any assigned_to value
-      finalAssignedTo = assigned_to || null;
+      finalAssignedTo = userId;
+    } else if (requested !== null) {
+      if (requested !== userId && !hasPermission(req, 'crm.opportunities.assign')) {
+        return res.status(403).json({ success: false, message: 'You cannot assign opportunities to other members' });
+      }
+      if (!(await isActiveMember(organizationId, requested))) {
+        return res.status(400).json({ success: false, message: 'Assigned user is not a member of this organization' });
+      }
+      finalAssignedTo = requested;
+    } else if (assigned_to) {
+      return res.status(400).json({ success: false, message: 'Assigned user is not a member of this organization' });
     }
 
-    // Check if lead exists
-    const leadCheckQuery = 'SELECT id, full_name, assigned_to FROM leads WHERE id = $1';
-    const leadResult = await pool.query(leadCheckQuery, [lead_id]);
-
+    // The lead must exist in this organization and be within the caller's lead scope.
+    const leadId = parseId(lead_id);
+    const leadParams = [leadId ?? 0, organizationId];
+    let leadQuery = 'SELECT l.id FROM leads l WHERE l.id = $1 AND l.organization_id = $2';
+    if (scopeFor(req, 'crm.leads.read') !== 'organization') {
+      leadParams.push(userId);
+      leadQuery += ` AND ${OWN_LEAD('l', '$3')}`;
+    }
+    const leadResult = await pool.query(leadQuery, leadParams);
     if (leadResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -86,229 +97,157 @@ const createOpportunity = async (req, res) => {
       });
     }
 
-    // Insert all fields into opportunities table, using NULL for missing optional fields
-    const query = `
-      INSERT INTO opportunities (
-        lead_id,
+    const results = await pool.query(
+      `INSERT INTO opportunities (
+         organization_id, lead_id, title, description, value, stage, probability, expected_close_date,
+         created_by, assigned_to
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id`,
+      [
+        organizationId,
+        leadId,
+        title,
+        description || null,
+        value || null,
+        stage || 'Prospecting',
+        probability || null,
+        expected_close_date || null,
+        userId,
+        finalAssignedTo
+      ]
+    );
+
+    await logAuditEvent(
+      userId,
+      'CREATE_OPPORTUNITY',
+      'opportunities',
+      results.rows[0].id,
+      null,
+      {
+        lead_id: leadId,
         title,
         description,
         value,
         stage,
         probability,
         expected_close_date,
-        created_by,
-        assigned_to
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id
-    `;
+        assigned_to: finalAssignedTo
+      }
+    );
 
-    // Handle optional fields by using NULL if they're not provided
-    const values = [
-      lead_id,
-      title,
-      description || null,
-      value || null,
-      stage || 'Prospecting',
-      probability || null,
-      expected_close_date || null,
-      userId, // created_by
-      finalAssignedTo // assigned_to
-    ];
-
-    try {
-      const results = await pool.query(query, values);
-
-      // Log opportunity creation
-      await logAuditEvent(
-        userId,
-        'CREATE_OPPORTUNITY',
-        'opportunities',
-        results.rows[0].id,
-        null,
-        {
-          lead_id,
-          title,
-          description,
-          value,
-          stage,
-          probability,
-          expected_close_date,
-          assigned_to: finalAssignedTo
-        },
-        req.ip,
-        req.get('User-Agent')
-      );
-
-      // Return the created opportunity's ID
-      res.status(201).json({
-        message: 'Opportunity created successfully',
-        opportunity: {
-          id: results.rows[0].id,
-          created_by: userId,
-          assigned_to: finalAssignedTo
-        }
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: 'Error creating opportunity',
-        error: error.message
-      });
-    }
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
+    res.status(201).json({
+      message: 'Opportunity created successfully',
+      opportunity: {
+        id: results.rows[0].id,
+        created_by: userId,
+        assigned_to: finalAssignedTo
+      }
     });
+  } catch (error) {
+    return serverError(res, 'Error creating opportunity', error);
   }
 };
 
 /**
- * Get all opportunities
+ * Get opportunities
  * @route   GET /opportunities
- * @desc    Get all opportunities based on user role
- * @access  Private
+ * @access  crm.opportunities.read (own scope: own opportunities only)
  */
 const getOpportunities = async (req, res) => {
   try {
-    const { roleId: role, userId } = req.user;
-
-    // Pagination parameters with defaults and max limit
+    const { organizationId, userId } = tenantOf(req);
     const page = parseInt(req.query.page) || 1;
-    const limit = Math.min(parseInt(req.query.limit) || 20, 100); // Default 20, max 100
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const offset = (page - 1) * limit;
 
-    let query;
-    let queryParams = [];
-    let countQuery;
-    let countParams = [];
-
-    if (role === 1) { // Admin - can see all opportunities
-      query = `
-        SELECT o.*, l.full_name as lead_name, l.email as lead_email, u.full_name as assigned_to_name
-        FROM opportunities o
-        LEFT JOIN leads l ON o.lead_id = l.id
-        LEFT JOIN users u ON o.assigned_to = u.id
-        ORDER BY o.created_at DESC
-        LIMIT $1 OFFSET $2
-      `;
-      queryParams = [limit, offset];
-
-      countQuery = `SELECT COUNT(id) FROM opportunities`;  // More efficient than COUNT(*)
-    } else if (role === 3) { // Sales - can see only their assigned opportunities or unassigned opportunities they created
-      query = `
-        SELECT o.*, l.full_name as lead_name, l.email as lead_email, u.full_name as assigned_to_name
-        FROM opportunities o
-        LEFT JOIN leads l ON o.lead_id = l.id
-        LEFT JOIN users u ON o.assigned_to = u.id
-        WHERE o.assigned_to = $1 OR (o.assigned_to IS NULL AND o.created_by = $1)
-        ORDER BY o.created_at DESC
-        LIMIT $2 OFFSET $3
-      `;
-      queryParams = [userId, limit, offset];
-
-      countQuery = `SELECT COUNT(id) FROM opportunities WHERE assigned_to = $1 OR (assigned_to IS NULL AND created_by = $1)`;
-      countParams = [userId];
-    } else if (role === 2) { // Manager - can see all opportunities
-      query = `
-        SELECT o.*, l.full_name as lead_name, l.email as lead_email, u.full_name as assigned_to_name
-        FROM opportunities o
-        LEFT JOIN leads l ON o.lead_id = l.id
-        LEFT JOIN users u ON o.assigned_to = u.id
-        ORDER BY o.created_at DESC
-        LIMIT $1 OFFSET $2
-      `;
-      queryParams = [limit, offset];
-
-      countQuery = `SELECT COUNT(id) FROM opportunities`;  // More efficient than COUNT(*)
-    } else {
-      return res.status(403).json({
-        message: 'Unauthorized role'
-      });
+    const params = [organizationId];
+    let where = 'WHERE o.organization_id = $1';
+    if (scopeFor(req, 'crm.opportunities.read') !== 'organization') {
+      params.push(userId);
+      where += ` AND ${OWN_OPPORTUNITY('o', '$2')}`;
     }
 
-    try {
-      // Execute both queries in parallel
-      const [results, countResult] = await Promise.all([
-        pool.query(query, queryParams),
-        pool.query(countQuery, countParams)
-      ]);
+    const query = `
+      SELECT o.*, l.full_name as lead_name, l.email as lead_email, u.full_name as assigned_to_name
+      FROM opportunities o
+      LEFT JOIN leads l ON o.lead_id = l.id AND l.organization_id = o.organization_id
+      LEFT JOIN users u ON o.assigned_to = u.id
+      ${where}
+      ORDER BY o.created_at DESC
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+    `;
 
-      const totalItems = parseInt(countResult.rows[0].count);
-      const totalPages = Math.ceil(totalItems / limit);
+    const [results, countResult] = await Promise.all([
+      pool.query(query, [...params, limit, offset]),
+      pool.query(`SELECT COUNT(o.id) FROM opportunities o ${where}`, params)
+    ]);
 
-      res.status(200).json({
-        opportunities: results.rows,
-        pagination: {
-          page,
-          limit,
-          totalItems,
-          totalPages,
-          hasNextPage: page < totalPages,
-          hasPrevPage: page > 1
-        }
-      });
-    } catch (error) {
-      res.status(500).json({
-        message: 'Error retrieving opportunities',
-        error: error.message
-      });
-    }
-  } catch (error) {
-    res.status(500).json({
-      message: 'Server error',
-      error: error.message
+    const totalItems = parseInt(countResult.rows[0].count);
+    const totalPages = Math.ceil(totalItems / limit);
+
+    res.status(200).json({
+      opportunities: results.rows,
+      pagination: {
+        page,
+        limit,
+        totalItems,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      }
     });
+  } catch (error) {
+    return serverError(res, 'Error retrieving opportunities', error);
   }
 };
 
 /**
- * Assign an opportunity to a sales user
+ * Assign an opportunity to a member
  * @route   PATCH /opportunities/:opportunityId/assign
- * @desc    Assign an opportunity to a sales user
- * @access  Private (Admin only)
+ * @access  crm.opportunities.assign (organization scope)
  */
 const assignOpportunity = async (req, res) => {
   try {
-    const { opportunityId } = req.params;
-    const { assigned_to: salesUserId } = req.body;
+    const { organizationId, userId } = tenantOf(req);
+    const opportunityId = parseId(req.params.opportunityId);
+    const { assigned_to } = req.body;
+    const salesUserId = assigned_to === null || assigned_to === undefined || assigned_to === '' ? null : parseId(assigned_to);
 
-    // Use transaction helper for all related database operations
-    await withTransaction(async (client) => {
-      // Check if opportunity exists and get current assignment
-      const checkOpportunityQuery = 'SELECT id, assigned_to FROM opportunities WHERE id = $1 FOR UPDATE';
-      const opportunityResult = await client.query(checkOpportunityQuery, [opportunityId]);
+    if (opportunityId === null) {
+      return res.status(404).json({ success: false, message: 'Opportunity not found' });
+    }
+    if (salesUserId !== null ? !(await isActiveMember(organizationId, salesUserId)) : assigned_to) {
+      return res.status(400).json({ success: false, message: 'Assigned user is not a member of this organization' });
+    }
 
-      if (opportunityResult.rows.length === 0) {
-        throw new Error('Opportunity not found');
-      }
+    const found = await withTransaction(async (client) => {
+      const opportunityResult = await client.query(
+        'SELECT id, assigned_to FROM opportunities WHERE id = $1 AND organization_id = $2 FOR UPDATE',
+        [opportunityId, organizationId]
+      );
+      if (opportunityResult.rows.length === 0) return false;
 
-      // Store old assignment value for audit logging
       const oldAssignment = opportunityResult.rows[0].assigned_to;
+      await client.query(
+        'UPDATE opportunities SET assigned_to = $1 WHERE id = $2 AND organization_id = $3',
+        [salesUserId, opportunityId, organizationId]
+      );
 
-      // Update opportunity assignment
-      const updateQuery = 'UPDATE opportunities SET assigned_to = $1 WHERE id = $2';
-      const updateResult = await client.query(updateQuery, [salesUserId, opportunityId]);
-
-      // Check if the update actually affected any rows
-      if (updateResult.rowCount === 0) {
-        throw new Error('Failed to update opportunity assignment');
-      }
-
-      // Log assignment change
       await logAuditEvent(
-        req.user.userId,
+        userId,
         'ASSIGN_OPPORTUNITY',
         'opportunities',
         opportunityId,
         { assigned_to: oldAssignment },
-        { assigned_to: salesUserId, changed_by: req.user.userId },
-        req.ip,
-        req.get('User-Agent')
+        { assigned_to: salesUserId, changed_by: userId }
       );
+      return true;
     });
+
+    if (!found) {
+      return res.status(404).json({ success: false, message: 'Opportunity not found' });
+    }
 
     res.status(200).json({
       message: 'Opportunity assigned successfully',
@@ -316,38 +255,29 @@ const assignOpportunity = async (req, res) => {
       assignedTo: salesUserId
     });
   } catch (error) {
-    // Handle specific errors
-    if (error.message === 'Opportunity not found') {
-      return res.status(404).json({
-        success: false,
-        message: 'Opportunity not found'
-      });
-    }
-
-    // Generic error response
-    res.status(500).json({
-      success: false,
-      message: 'Error assigning opportunity',
-      error: error.message
-    });
+    return serverError(res, 'Error assigning opportunity', error);
   }
 };
 
 /**
  * Update an opportunity
  * @route   PUT /opportunities/:id
- * @desc    Update opportunity details
- * @access  Private
+ * @access  crm.opportunities.update (own scope: opportunities assigned to me)
  */
 const updateOpportunity = async (req, res) => {
   try {
-    const opportunityId = req.params.id; // Using id for PUT /opportunities/:id route
+    const { organizationId, userId } = tenantOf(req);
+    const opportunityId = parseId(req.params.id);
     const { title, description, value, stage, probability, expected_close_date } = req.body;
-    const { userId } = req.user;
 
-    // Check if opportunity exists and get current assignment
-    const checkOpportunityQuery = 'SELECT id, assigned_to, stage FROM opportunities WHERE id = $1';
-    const results = await pool.query(checkOpportunityQuery, [opportunityId]);
+    if (opportunityId === null) {
+      return res.status(404).json({ message: 'Opportunity not found' });
+    }
+
+    const results = await pool.query(
+      'SELECT id, assigned_to, created_by, stage FROM opportunities WHERE id = $1 AND organization_id = $2',
+      [opportunityId, organizationId]
+    );
 
     if (results.rows.length === 0) {
       return res.status(404).json({
@@ -355,64 +285,28 @@ const updateOpportunity = async (req, res) => {
       });
     }
 
-    // Check if opportunity is assigned to the current user
     const opportunity = results.rows[0];
-    const { roleId: role } = req.user;
-
-    // Store old stage for audit logging
     const oldStage = opportunity.stage;
 
-    if (opportunity.assigned_to !== userId) {
-      // Role-specific error messages
-      if (role === 2) { // Manager
-        return res.status(403).json({
-          message: 'Managers are not allowed to update opportunity details'
-        });
-      } else if (role === 3) { // Sales
-        return res.status(403).json({
-          message: 'You cannot update opportunities assigned to another sales executive'
-        });
-      } else {
-        return res.status(403).json({
-          message: 'Forbidden: You can only update opportunities assigned to you'
-        });
-      }
+    if (scopeFor(req, 'crm.opportunities.update') !== 'organization' && !isOwnOpportunity(opportunity, userId)) {
+      return res.status(403).json({
+        message: 'Forbidden: You can only update opportunities assigned to you'
+      });
     }
 
-    // Update allowed fields
     const updateFields = [];
     const updateValues = [];
-    let paramIndex = 1;
+    const set = (column, fieldValue) => {
+      updateValues.push(fieldValue);
+      updateFields.push(`${column} = $${updateValues.length}`);
+    };
 
-    if (title !== undefined) {
-      updateFields.push(`title = $${paramIndex++}`);
-      updateValues.push(title);
-    }
-
-    if (description !== undefined) {
-      updateFields.push(`description = $${paramIndex++}`);
-      updateValues.push(description);
-    }
-
-    if (value !== undefined) {
-      updateFields.push(`value = $${paramIndex++}`);
-      updateValues.push(value);
-    }
-
-    if (stage !== undefined) {
-      updateFields.push(`stage = $${paramIndex++}`);
-      updateValues.push(stage);
-    }
-
-    if (probability !== undefined) {
-      updateFields.push(`probability = $${paramIndex++}`);
-      updateValues.push(probability);
-    }
-
-    if (expected_close_date !== undefined) {
-      updateFields.push(`expected_close_date = $${paramIndex++}`);
-      updateValues.push(expected_close_date);
-    }
+    if (title !== undefined) set('title', title);
+    if (description !== undefined) set('description', description);
+    if (value !== undefined) set('value', value);
+    if (stage !== undefined) set('stage', stage);
+    if (probability !== undefined) set('probability', probability);
+    if (expected_close_date !== undefined) set('expected_close_date', expected_close_date);
 
     if (updateFields.length === 0) {
       return res.status(400).json({
@@ -420,47 +314,38 @@ const updateOpportunity = async (req, res) => {
       });
     }
 
-    updateValues.push(opportunityId);
-
-    const updateQuery = `
-      UPDATE opportunities
-      SET ${updateFields.join(', ')}
-      WHERE id = $${paramIndex}
-    `;
-
+    updateValues.push(opportunityId, organizationId);
     try {
-      await pool.query(updateQuery, updateValues);
-
-      // Log stage change if stage was updated
-      if (stage !== undefined && stage !== oldStage) {
-        await logAuditEvent(
-          userId,
-          'UPDATE_OPPORTUNITY_STAGE',
-          'opportunities',
-          opportunityId,
-          { stage: oldStage },
-          { stage: stage, updated_by: userId },
-          req.ip,
-          req.get('User-Agent')
-        );
-      }
-
-      res.status(200).json({
-        message: 'Opportunity updated successfully',
-        opportunityId,
-        updatedFields: updateFields.map(field => field.split(' = ')[0])
-      });
+      await pool.query(
+        `UPDATE opportunities SET ${updateFields.join(', ')}
+         WHERE id = $${updateValues.length - 1} AND organization_id = $${updateValues.length}`,
+        updateValues
+      );
     } catch (error) {
-      res.status(500).json({
-        message: 'Error updating opportunity',
-        error: error.message
-      });
+      if (error.code === '23514') {
+        return res.status(400).json({ message: 'Opportunity data violates a validation rule' });
+      }
+      throw error;
     }
-  } catch (error) {
-    res.status(500).json({
-      message: 'Server error',
-      error: error.message
+
+    if (stage !== undefined && stage !== oldStage) {
+      await logAuditEvent(
+        userId,
+        'UPDATE_OPPORTUNITY_STAGE',
+        'opportunities',
+        opportunityId,
+        { stage: oldStage },
+        { stage, updated_by: userId }
+      );
+    }
+
+    res.status(200).json({
+      message: 'Opportunity updated successfully',
+      opportunityId,
+      updatedFields: updateFields.map(field => field.split(' = ')[0])
     });
+  } catch (error) {
+    return serverError(res, 'Error updating opportunity', error);
   }
 };
 

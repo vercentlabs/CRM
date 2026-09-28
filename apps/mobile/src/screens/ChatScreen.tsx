@@ -541,7 +541,7 @@ const ChatScreen = () => {
                   </View>
                 </View>
                 <View style={styles.heroActions}>
-                  <Pressable style={styles.heroButton} onPress={loadConversations}>
+                  <Pressable style={styles.heroButton} onPress={() => void loadConversations()}>
                     <Feather name="refresh-cw" size={12} color="#ffffff" />
                     <Text style={styles.heroButtonText}>Refresh</Text>
                   </Pressable>

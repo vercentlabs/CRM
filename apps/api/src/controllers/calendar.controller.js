@@ -1,18 +1,23 @@
 
 import pool from '../config/db.js';
+import { scopeFor, serverError, tenantOf } from '../platform/tenancy.js';
+import { loadScopedTask, resolveTaskAssignee } from './task.controller.js';
 
 /**
- * Get calendar events based on user role
+ * Calendar events are rows in `tasks` (crm.tasks.* permissions, own scope =
+ * assigned to me), always bounded by the verified organization.
+ */
+
+/**
  * @route   GET /calendar
- * @desc    Get calendar events
- * @access  Private
+ * @access  crm.tasks.read
  */
 const getEvents = async (req, res) => {
   try {
-    const { userId, roleId: role } = req.user;
-
+    const { organizationId, userId } = tenantOf(req);
+    const params = [organizationId];
     let query = `
-      SELECT 
+      SELECT
         t.id,
         t.title,
         t.description,
@@ -25,256 +30,144 @@ const getEvents = async (req, res) => {
         'task' as event_type
       FROM tasks t
       LEFT JOIN users u ON t.assigned_to = u.id
+      WHERE t.organization_id = $1
     `;
 
-    let queryParams = [];
-
-    // Role-based filtering
-    if (role === 3) { // Sales - only their own tasks
-      query += ' WHERE t.assigned_to = $1';
-      queryParams.push(userId);
+    if (scopeFor(req, 'crm.tasks.read') !== 'organization') {
+      params.push(userId);
+      query += ` AND t.assigned_to = $${params.length}`;
     }
 
-    // Order by due_date
     query += ' ORDER BY t.due_date ASC';
+    const results = await pool.query(query, params);
 
-    pool.query(query, queryParams, (error, results) => {
-      if (error) {
-        return res.status(500).json({
-          message: 'Error retrieving calendar events',
-          error: error.message
-        });
-      }
-
-      res.status(200).json({
-        message: 'Events retrieved successfully',
-        events: results.rows
-      });
+    res.status(200).json({
+      message: 'Events retrieved successfully',
+      events: results.rows
     });
   } catch (error) {
-    res.status(500).json({
-      message: 'Server error',
-      error: error.message
-    });
+    return serverError(res, 'Error retrieving calendar events', error);
   }
 };
 
 /**
- * Create a new calendar event
  * @route   POST /calendar
- * @desc    Create a new calendar event
- * @access  Private
+ * @access  crm.tasks.create (defaults to assigning the creator)
  */
 const createEvent = async (req, res) => {
   try {
-    const { userId } = req.user;
-    const { title, description, start_date, end_date, priority, status, user_id } = req.body;
+    const { organizationId, userId } = tenantOf(req);
+    const { title, description, start_date, priority, status, user_id } = req.body;
 
-    // Validate required fields
     if (!title || !start_date) {
       return res.status(400).json({
         message: 'Title and start date are required'
       });
     }
 
-    const query = `
-      INSERT INTO tasks (title, description, due_date, priority, status, assigned_to, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING *
-    `;
+    const assignment = await resolveTaskAssignee(req, 'crm.tasks.create', user_id, { defaultToSelf: true });
+    if (assignment.error) return res.status(assignment.status).json({ message: assignment.error });
 
-    const values = [
-      title,
-      description || null,
-      start_date,
-      priority || 'medium',
-      status || 'pending',
-      user_id || userId,
-      userId
-    ];
-
-    pool.query(query, values, (error, results) => {
-      if (error) {
-        return res.status(500).json({
-          message: 'Error creating event',
-          error: error.message
-        });
-      }
-
-      const newEvent = results.rows[0];
-
+    try {
+      const results = await pool.query(
+        `INSERT INTO tasks (organization_id, title, description, due_date, priority, status, assigned_to, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *`,
+        [organizationId, title, description || null, start_date, priority || 'medium', status || 'pending', assignment.assignee, userId]
+      );
       res.status(201).json({
         message: 'Event created successfully',
-        event: newEvent
+        event: results.rows[0]
       });
-    });
+    } catch (error) {
+      if (error.code === '23514' || error.code === '22007' || error.code === '22008') {
+        return res.status(400).json({ message: 'Event data violates a validation rule' });
+      }
+      throw error;
+    }
   } catch (error) {
-    res.status(500).json({
-      message: 'Server error',
-      error: error.message
-    });
+    return serverError(res, 'Error creating event', error);
   }
 };
 
 /**
- * Update a calendar event
  * @route   PATCH /calendar/:id
- * @desc    Update a calendar event
- * @access  Private
+ * @access  crm.tasks.update (own scope: events assigned to me)
  */
 const updateEvent = async (req, res) => {
   try {
-    const { userId, roleId: role } = req.user;
-    const { id: eventId } = req.params;
-    const { title, description, start_date, end_date, priority, status, user_id } = req.body;
+    const { organizationId } = tenantOf(req);
+    const { title, description, start_date, priority, status, user_id } = req.body;
 
-    // First check if the event exists
-    const checkQuery = 'SELECT * FROM tasks WHERE id = $1';
-    pool.query(checkQuery, [eventId], (checkError, checkResults) => {
-      if (checkError) {
-        return res.status(500).json({
-          message: 'Error checking event',
-          error: checkError.message
-        });
-      }
+    const loaded = await loadScopedTask(req, 'crm.tasks.update', req.params.id);
+    if (loaded.status === 404) return res.status(404).json({ message: 'Event not found' });
+    if (loaded.status === 403) return res.status(403).json({ message: 'You can only update your own events' });
 
-      if (checkResults.rows.length === 0) {
-        return res.status(404).json({
-          message: 'Event not found'
-        });
-      }
+    const updates = [];
+    const values = [];
+    const set = (column, value) => {
+      values.push(value);
+      updates.push(`${column} = $${values.length}`);
+    };
 
-      const event = checkResults.rows[0];
+    if (title !== undefined) set('title', title);
+    if (description !== undefined) set('description', description);
+    if (start_date !== undefined) set('due_date', start_date);
+    if (priority !== undefined) set('priority', priority);
+    if (status !== undefined) set('status', status);
+    if (user_id !== undefined) {
+      const assignment = await resolveTaskAssignee(req, 'crm.tasks.update', user_id, { defaultToSelf: false });
+      if (assignment.error) return res.status(assignment.status).json({ message: assignment.error });
+      set('assigned_to', assignment.assignee);
+    }
 
-      // Check if user has permission to update the event
-      if (role === 3 && event.assigned_to !== userId) {
-        return res.status(403).json({
-          message: 'You can only update your own events'
-        });
-      }
-
-      // Build the update query dynamically based on provided fields
-      const updates = [];
-      const values = [];
-      let paramCount = 1;
-
-      if (title !== undefined) {
-        updates.push(`title = $${paramCount++}`);
-        values.push(title);
-      }
-      if (description !== undefined) {
-        updates.push(`description = $${paramCount++}`);
-        values.push(description);
-      }
-      if (start_date !== undefined) {
-        updates.push(`due_date = $${paramCount++}`);
-        values.push(start_date);
-      }
-      if (priority !== undefined) {
-        updates.push(`priority = $${paramCount++}`);
-        values.push(priority);
-      }
-      if (status !== undefined) {
-        updates.push(`status = $${paramCount++}`);
-        values.push(status);
-      }
-      if (user_id !== undefined) {
-        updates.push(`assigned_to = $${paramCount++}`);
-        values.push(user_id);
-      }
-
-      if (updates.length === 0) {
-        return res.status(400).json({
-          message: 'No fields to update'
-        });
-      }
-
-      values.push(eventId);
-      const updateQuery = `
-        UPDATE tasks
-        SET ${updates.join(', ')}, updated_at = NOW()
-        WHERE id = $${paramCount}
-        RETURNING *
-      `;
-
-      pool.query(updateQuery, values, (updateError, updateResults) => {
-        if (updateError) {
-          return res.status(500).json({
-            message: 'Error updating event',
-            error: updateError.message
-          });
-        }
-
-        const updatedEvent = updateResults.rows[0];
-
-        res.status(200).json({
-          message: 'Event updated successfully',
-          event: updatedEvent
-        });
+    if (updates.length === 0) {
+      return res.status(400).json({
+        message: 'No fields to update'
       });
-    });
+    }
+
+    values.push(loaded.task.id, organizationId);
+    try {
+      const updateResults = await pool.query(
+        `UPDATE tasks SET ${updates.join(', ')}, updated_at = NOW()
+         WHERE id = $${values.length - 1} AND organization_id = $${values.length}
+         RETURNING *`,
+        values
+      );
+      res.status(200).json({
+        message: 'Event updated successfully',
+        event: updateResults.rows[0]
+      });
+    } catch (error) {
+      if (error.code === '23514' || error.code === '22007' || error.code === '22008') {
+        return res.status(400).json({ message: 'Event data violates a validation rule' });
+      }
+      throw error;
+    }
   } catch (error) {
-    res.status(500).json({
-      message: 'Server error',
-      error: error.message
-    });
+    return serverError(res, 'Error updating event', error);
   }
 };
 
 /**
- * Delete a calendar event
  * @route   DELETE /calendar/:id
- * @desc    Delete a calendar event
- * @access  Private
+ * @access  crm.tasks.delete
  */
 const deleteEvent = async (req, res) => {
   try {
-    const { userId, roleId: role } = req.user;
-    const { id: eventId } = req.params;
+    const { organizationId } = tenantOf(req);
+    const loaded = await loadScopedTask(req, 'crm.tasks.delete', req.params.id);
+    if (loaded.status === 404) return res.status(404).json({ message: 'Event not found' });
+    if (loaded.status === 403) return res.status(403).json({ message: 'You can only delete your own events' });
 
-    // Only Admin and Manager can delete events
-    if (role !== 1 && role !== 2) {
-      return res.status(403).json({
-        message: 'Only Admin and Manager can delete events'
-      });
-    }
+    await pool.query('DELETE FROM tasks WHERE id = $1 AND organization_id = $2', [loaded.task.id, organizationId]);
 
-    // First check if the event exists
-    const checkQuery = 'SELECT * FROM tasks WHERE id = $1';
-    pool.query(checkQuery, [eventId], (checkError, checkResults) => {
-      if (checkError) {
-        return res.status(500).json({
-          message: 'Error checking event',
-          error: checkError.message
-        });
-      }
-
-      if (checkResults.rows.length === 0) {
-        return res.status(404).json({
-          message: 'Event not found'
-        });
-      }
-
-      // Delete the event
-      const deleteQuery = 'DELETE FROM tasks WHERE id = $1';
-      pool.query(deleteQuery, [eventId], (deleteError, deleteResults) => {
-        if (deleteError) {
-          return res.status(500).json({
-            message: 'Error deleting event',
-            error: deleteError.message
-          });
-        }
-
-        res.status(200).json({
-          message: 'Event deleted successfully'
-        });
-      });
+    res.status(200).json({
+      message: 'Event deleted successfully'
     });
   } catch (error) {
-    res.status(500).json({
-      message: 'Server error',
-      error: error.message
-    });
+    return serverError(res, 'Error deleting event', error);
   }
 };
 

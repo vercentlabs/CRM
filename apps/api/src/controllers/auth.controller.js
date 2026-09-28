@@ -1,117 +1,52 @@
-import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
-import pool from '../config/db.js';
-import { sendSuccess, sendError, sendValidationError } from '../utils/response.js';
-import { logAuditEvent } from '../utils/auditLogger.js';
+import { loginRequestSchema, toFieldIssues } from '@crm/validation';
+import { resolveAuth } from '../platform/auth/middleware.js';
+import { login as loginWithPassword, logout as endSession, logoutByRefreshToken } from '../platform/auth/service.js';
+import { sendSuccess, sendValidationError } from '../utils/response.js';
 
-// Login controller
+/**
+ * Legacy login (`POST /auth/login`) kept for already-installed mobile builds.
+ * It now creates a server session and returns a short-lived access token plus
+ * a rotating refresh token in the historical `{ success, message, data }` shape.
+ * Browsers use `POST /api/v1/auth/login` (HttpOnly cookies) instead.
+ */
 const login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    // Validate input
-    if (!email || !password) {
-      return sendValidationError(res, [
-        { field: email ? 'password' : 'email', message: `${email ? 'Password' : 'Email'} is required` }
-      ]);
-    }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return sendValidationError(res, [
-        { field: 'email', message: 'Invalid email format' }
-      ]);
-    }
-
-    // Validate password length (minimum 8 characters)
-    if (password.length < 8) {
-      return sendValidationError(res, [
-        { field: 'password', message: 'Password must be at least 8 characters long' }
-      ]);
-    }
-
-    // Validate password complexity (at least one letter and one number)
-    const passwordRegex = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d@$!%*#?&]{8,}$/;
-    if (!passwordRegex.test(password)) {
-      return sendValidationError(res, [
-        { field: 'password', message: 'Password must contain at least one letter and one number' }
-      ]);
-    }
-
-    // Query the database for the user
-    const userQuery = 'SELECT id, email, password_hash, role_id, full_name, username FROM users WHERE email = $1';
-    const userResult = await pool.query(userQuery, [email]);
-
-    // Check if user exists
-    if (userResult.rows.length === 0) {
-      return sendError(res, 'Invalid email or password', 401);
-    }
-
-    const user = userResult.rows[0];
-
-    // Compare the provided password with the stored hash
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
-
-    if (!isPasswordValid) {
-      return sendError(res, 'Invalid email or password', 401);
-    }
-
-    // Generate JWT token
-    const token = jwt.sign(
-      {
-        userId: user.id,
-        roleId: user.role_id,
-        name: user.full_name || user.username,
-        email: user.email
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
-    // Log successful login
-    await logAuditEvent(
-      user.id,
-      'LOGIN_SUCCESS',
-      'users',
-      user.id,
-      null,
-      {
-        email: user.email,
-        roleId: user.role_id,
-        timestamp: new Date().toISOString()
-      },
-      req.ip,
-      req.get('User-Agent')
-    );
-
-    // Return the token to the client
-    return sendSuccess(res, 'Login successful', {
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        roleId: user.role_id,
-        name: user.full_name || user.username
-      }
-    });
-
-  } catch (error) {
-    console.error('Error during login:', error);
-    return sendError(res, 'Internal server error', 500, error.message);
+  const parsed = loginRequestSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return sendValidationError(res, toFieldIssues(parsed.error));
   }
+
+  const issued = await loginWithPassword({
+    email: parsed.data.email,
+    password: parsed.data.password,
+    client: 'mobile',
+    userAgent: req.get('User-Agent')
+  });
+
+  res.setHeader('Cache-Control', 'no-store');
+  return sendSuccess(res, 'Login successful', {
+    token: issued.accessToken,
+    refreshToken: issued.refreshToken,
+    expiresIn: Math.round((issued.accessTokenExpiresAt.getTime() - Date.now()) / 1000),
+    user: {
+      id: issued.subject.userId,
+      email: issued.subject.email,
+      roleId: issued.subject.legacyRoleId,
+      name: issued.subject.name
+    }
+  });
 };
 
-// Logout controller
+/** Logout revokes the server session (access token, or refresh token when the access token expired). */
 const logout = async (req, res) => {
   try {
-    // For JWT tokens, logout is typically handled client-side by removing the token
-    // We don't need to do anything server-side, but we'll return a success message
-    return sendSuccess(res, 'Logout successful');
+    const subject = await resolveAuth(req);
+    await endSession(subject.sessionId, subject.userId, subject.organizationId);
   } catch (error) {
-    console.error('Error during logout:', error);
-    return sendError(res, 'Internal server error', 500, error.message);
+    const refreshToken = req.body?.refreshToken;
+    if (typeof refreshToken !== 'string' || !refreshToken) throw error;
+    await logoutByRefreshToken(refreshToken);
   }
+  return sendSuccess(res, 'Logout successful');
 };
 
 export {

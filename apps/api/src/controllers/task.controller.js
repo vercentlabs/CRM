@@ -1,327 +1,213 @@
 
 import pool from '../config/db.js';
 import { logAuditEvent } from '../utils/auditLogger.js';
+import { isActiveMember, parseId, scopeFor, serverError, tenantOf } from '../platform/tenancy.js';
 
 /**
- * Get tasks based on user role
+ * Tasks (and calendar events, which are task rows). Own scope = assigned to me.
+ * Exported helpers are shared with calendar.controller.js.
+ */
+export const resolveTaskAssignee = async (req, permission, requested, { defaultToSelf }) => {
+  const { organizationId, userId } = tenantOf(req);
+  const assignee = requested === undefined || requested === null || requested === '' ? null : parseId(requested);
+  if (requested && assignee === null) return { error: 'Assigned user is not a member of this organization', status: 400 };
+  if (scopeFor(req, permission) !== 'organization') {
+    if (assignee !== null && assignee !== userId) {
+      return { error: 'You can only assign tasks to yourself', status: 403 };
+    }
+    return { assignee: userId };
+  }
+  if (assignee !== null && !(await isActiveMember(organizationId, assignee))) {
+    return { error: 'Assigned user is not a member of this organization', status: 400 };
+  }
+  return { assignee: assignee ?? (defaultToSelf ? userId : null) };
+};
+
+/** Loads a task inside the organization; `forbidden` when outside the caller's scope. */
+export const loadScopedTask = async (req, permission, rawId) => {
+  const { organizationId, userId } = tenantOf(req);
+  const id = parseId(rawId);
+  if (id === null) return { status: 404 };
+  const result = await pool.query('SELECT * FROM tasks WHERE id = $1 AND organization_id = $2', [id, organizationId]);
+  const task = result.rows[0];
+  if (!task) return { status: 404 };
+  if (scopeFor(req, permission) !== 'organization' && task.assigned_to !== userId) return { status: 403, task };
+  return { status: 200, task };
+};
+
+/**
  * @route   GET /tasks
- * @desc    Get tasks based on user role
- * @access  Private
+ * @access  crm.tasks.read
  */
 const getTasks = async (req, res) => {
   try {
-    const { userId, roleId: role } = req.user;
+    const { organizationId, userId } = tenantOf(req);
+    const params = [organizationId];
     let query = `
       SELECT t.*, u.full_name as assigned_to_name, u.email as assigned_to_email
       FROM tasks t
       LEFT JOIN users u ON t.assigned_to = u.id
+      WHERE t.organization_id = $1
     `;
 
-    let queryParams = [];
-
-    // Role-based filtering
-    if (role === 3) { // Sales - only their own tasks
-      query += ' WHERE t.assigned_to = $1';
-      queryParams.push(userId);
+    if (scopeFor(req, 'crm.tasks.read') !== 'organization') {
+      params.push(userId);
+      query += ` AND t.assigned_to = $${params.length}`;
     }
-    // For Manager (2) and Admin (1), no WHERE clause needed - they can see all tasks
 
-    // Order by due_date
     query += ' ORDER BY t.due_date ASC';
+    const results = await pool.query(query, params);
 
-    pool.query(query, queryParams, (error, results) => {
-      if (error) {
-        return res.status(500).json({
-          message: 'Error retrieving tasks',
-          error: error.message
-        });
-      }
-
-      res.status(200).json({
-        message: 'Tasks retrieved successfully',
-        tasks: results.rows
-      });
+    res.status(200).json({
+      message: 'Tasks retrieved successfully',
+      tasks: results.rows
     });
   } catch (error) {
-    res.status(500).json({
-      message: 'Server error',
-      error: error.message
-    });
+    return serverError(res, 'Error retrieving tasks', error);
   }
 };
 
 /**
- * Create a new task
  * @route   POST /tasks
- * @desc    Create a new task
- * @access  Private (Admin and Manager only)
+ * @access  crm.tasks.create (own scope: the task is assigned to the creator)
  */
 const createTask = async (req, res) => {
   try {
-    const { userId } = req.user;
+    const { organizationId, userId } = tenantOf(req);
     const { title, description, due_date, priority, assigned_to, status } = req.body;
 
-    // Validate required fields
     if (!title || !due_date) {
       return res.status(400).json({
         message: 'Title and due date are required'
       });
     }
 
-    const query = `
-      INSERT INTO tasks (title, description, due_date, priority, assigned_to, status, created_by)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING *
-    `;
+    const assignment = await resolveTaskAssignee(req, 'crm.tasks.create', assigned_to, { defaultToSelf: false });
+    if (assignment.error) return res.status(assignment.status).json({ message: assignment.error });
 
-    const values = [
-      title,
-      description || null,
-      due_date,
-      priority || 'medium',
-      assigned_to || null,
-      status || 'pending',
-      userId
-    ];
-
-    pool.query(query, values, async (error, results) => {
-      if (error) {
-        return res.status(500).json({
-          message: 'Error creating task',
-          error: error.message
-        });
+    let newTask;
+    try {
+      const results = await pool.query(
+        `INSERT INTO tasks (organization_id, title, description, due_date, priority, assigned_to, status, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *`,
+        [organizationId, title, description || null, due_date, priority || 'medium', assignment.assignee, status || 'pending', userId]
+      );
+      newTask = results.rows[0];
+    } catch (error) {
+      if (error.code === '23514' || error.code === '22007' || error.code === '22008') {
+        return res.status(400).json({ message: 'Task data violates a validation rule' });
       }
+      throw error;
+    }
 
-      const newTask = results.rows[0];
+    await logAuditEvent(userId, 'CREATE_TASK', 'tasks', newTask.id, null, {
+      title: newTask.title,
+      assigned_to: newTask.assigned_to,
+      due_date: newTask.due_date
+    });
 
-      // Log task creation
-      try {
-        await logAuditEvent(
-          userId,
-          'CREATE_TASK',
-          'task',
-          newTask.id,
-          {
-            title: newTask.title,
-            assigned_to: newTask.assigned_to,
-            due_date: newTask.due_date
-          }
-        );
-      } catch (logError) {
-        console.error('Error logging task creation:', logError);
-        // Continue with response even if logging fails
-      }
-
-      res.status(201).json({
-        message: 'Task created successfully',
-        task: newTask
-      });
+    res.status(201).json({
+      message: 'Task created successfully',
+      task: newTask
     });
   } catch (error) {
-    res.status(500).json({
-      message: 'Server error',
-      error: error.message
-    });
+    return serverError(res, 'Error creating task', error);
   }
 };
 
 /**
- * Update a task
  * @route   PATCH /tasks/:id
- * @desc    Update a task
- * @access  Private (Admin, Manager, and assigned user)
+ * @access  crm.tasks.update (own scope: tasks assigned to me)
  */
 const updateTask = async (req, res) => {
   try {
-    const { userId, roleId: role } = req.user;
-    const { id: taskId } = req.params;
+    const { organizationId, userId } = tenantOf(req);
     const { title, description, due_date, priority, assigned_to, status } = req.body;
 
-    // First check if the task exists
-    const checkQuery = 'SELECT * FROM tasks WHERE id = $1';
-    pool.query(checkQuery, [taskId], (checkError, checkResults) => {
-      if (checkError) {
-        return res.status(500).json({
-          message: 'Error checking task',
-          error: checkError.message
-        });
-      }
+    const loaded = await loadScopedTask(req, 'crm.tasks.update', req.params.id);
+    if (loaded.status === 404) return res.status(404).json({ message: 'Task not found' });
+    if (loaded.status === 403) return res.status(403).json({ message: 'You can only update your own tasks' });
 
-      if (checkResults.rows.length === 0) {
-        return res.status(404).json({
-          message: 'Task not found'
-        });
-      }
+    const updates = [];
+    const values = [];
+    const set = (column, value) => {
+      values.push(value);
+      updates.push(`${column} = $${values.length}`);
+    };
 
-      const task = checkResults.rows[0];
+    if (title !== undefined) set('title', title);
+    if (description !== undefined) set('description', description);
+    if (due_date !== undefined) set('due_date', due_date);
+    if (priority !== undefined) set('priority', priority);
+    if (assigned_to !== undefined) {
+      const assignment = await resolveTaskAssignee(req, 'crm.tasks.update', assigned_to, { defaultToSelf: false });
+      if (assignment.error) return res.status(assignment.status).json({ message: assignment.error });
+      set('assigned_to', assignment.assignee);
+    }
+    if (status !== undefined) set('status', status);
 
-      // Check if user has permission to update the task
-      // Admin and Manager can update any task, Sales can only update their own tasks
-      if (role === 3 && task.assigned_to !== userId) {
-        return res.status(403).json({
-          message: 'You can only update your own tasks'
-        });
-      }
-
-      // Build the update query dynamically based on provided fields
-      const updates = [];
-      const values = [];
-      let paramCount = 1;
-
-      if (title !== undefined) {
-        updates.push(`title = $${paramCount++}`);
-        values.push(title);
-      }
-      if (description !== undefined) {
-        updates.push(`description = $${paramCount++}`);
-        values.push(description);
-      }
-      if (due_date !== undefined) {
-        updates.push(`due_date = $${paramCount++}`);
-        values.push(due_date);
-      }
-      if (priority !== undefined) {
-        updates.push(`priority = $${paramCount++}`);
-        values.push(priority);
-      }
-      if (assigned_to !== undefined) {
-        updates.push(`assigned_to = $${paramCount++}`);
-        values.push(assigned_to);
-      }
-      if (status !== undefined) {
-        updates.push(`status = $${paramCount++}`);
-        values.push(status);
-      }
-
-      if (updates.length === 0) {
-        return res.status(400).json({
-          message: 'No fields to update'
-        });
-      }
-
-      values.push(taskId);
-      const updateQuery = `
-        UPDATE tasks
-        SET ${updates.join(', ')}, updated_at = NOW()
-        WHERE id = $${paramCount}
-        RETURNING *
-      `;
-
-      pool.query(updateQuery, values, async (updateError, updateResults) => {
-        if (updateError) {
-          return res.status(500).json({
-            message: 'Error updating task',
-            error: updateError.message
-          });
-        }
-
-        const updatedTask = updateResults.rows[0];
-
-        // Log task update
-        try {
-          await logAuditEvent(
-            userId,
-            'UPDATE_TASK',
-            'task',
-            updatedTask.id,
-            {
-              title: updatedTask.title,
-              assigned_to: updatedTask.assigned_to,
-              status: updatedTask.status
-            }
-          );
-        } catch (logError) {
-          console.error('Error logging task update:', logError);
-          // Continue with response even if logging fails
-        }
-
-        res.status(200).json({
-          message: 'Task updated successfully',
-          task: updatedTask
-        });
+    if (updates.length === 0) {
+      return res.status(400).json({
+        message: 'No fields to update'
       });
+    }
+
+    values.push(loaded.task.id, organizationId);
+    let updatedTask;
+    try {
+      const updateResults = await pool.query(
+        `UPDATE tasks SET ${updates.join(', ')}, updated_at = NOW()
+         WHERE id = $${values.length - 1} AND organization_id = $${values.length}
+         RETURNING *`,
+        values
+      );
+      updatedTask = updateResults.rows[0];
+    } catch (error) {
+      if (error.code === '23514' || error.code === '22007' || error.code === '22008') {
+        return res.status(400).json({ message: 'Task data violates a validation rule' });
+      }
+      throw error;
+    }
+
+    await logAuditEvent(userId, 'UPDATE_TASK', 'tasks', updatedTask.id, null, {
+      title: updatedTask.title,
+      assigned_to: updatedTask.assigned_to,
+      status: updatedTask.status
+    });
+
+    res.status(200).json({
+      message: 'Task updated successfully',
+      task: updatedTask
     });
   } catch (error) {
-    res.status(500).json({
-      message: 'Server error',
-      error: error.message
-    });
+    return serverError(res, 'Error updating task', error);
   }
 };
 
 /**
- * Delete a task
  * @route   DELETE /tasks/:id
- * @desc    Delete a task
- * @access  Private (Admin and Manager only)
+ * @access  crm.tasks.delete
  */
 const deleteTask = async (req, res) => {
   try {
-    const { userId, roleId: role } = req.user;
-    const { id: taskId } = req.params;
+    const { organizationId, userId } = tenantOf(req);
+    const loaded = await loadScopedTask(req, 'crm.tasks.delete', req.params.id);
+    if (loaded.status === 404) return res.status(404).json({ message: 'Task not found' });
+    if (loaded.status === 403) return res.status(403).json({ message: 'You can only delete your own tasks' });
 
-    // Only Admin and Manager can delete tasks
-    if (role !== 1 && role !== 2) {
-      return res.status(403).json({
-        message: 'Only Admin and Manager can delete tasks'
-      });
-    }
+    await pool.query('DELETE FROM tasks WHERE id = $1 AND organization_id = $2', [loaded.task.id, organizationId]);
 
-    // First check if the task exists
-    const checkQuery = 'SELECT * FROM tasks WHERE id = $1';
-    pool.query(checkQuery, [taskId], (checkError, checkResults) => {
-      if (checkError) {
-        return res.status(500).json({
-          message: 'Error checking task',
-          error: checkError.message
-        });
-      }
+    await logAuditEvent(userId, 'DELETE_TASK', 'tasks', loaded.task.id, {
+      title: loaded.task.title,
+      assigned_to: loaded.task.assigned_to
+    });
 
-      if (checkResults.rows.length === 0) {
-        return res.status(404).json({
-          message: 'Task not found'
-        });
-      }
-
-      const task = checkResults.rows[0];
-
-      // Delete the task
-      const deleteQuery = 'DELETE FROM tasks WHERE id = $1';
-      pool.query(deleteQuery, [taskId], async (deleteError, deleteResults) => {
-        if (deleteError) {
-          return res.status(500).json({
-            message: 'Error deleting task',
-            error: deleteError.message
-          });
-        }
-
-        // Log task deletion
-        try {
-          await logAuditEvent(
-            userId,
-            'DELETE_TASK',
-            'task',
-            taskId,
-            {
-              title: task.title,
-              assigned_to: task.assigned_to
-            }
-          );
-        } catch (logError) {
-          console.error('Error logging task deletion:', logError);
-          // Continue with response even if logging fails
-        }
-
-        res.status(200).json({
-          message: 'Task deleted successfully'
-        });
-      });
+    res.status(200).json({
+      message: 'Task deleted successfully'
     });
   } catch (error) {
-    res.status(500).json({
-      message: 'Server error',
-      error: error.message
-    });
+    return serverError(res, 'Error deleting task', error);
   }
 };
 

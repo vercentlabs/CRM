@@ -1,38 +1,33 @@
 /**
  * Sales Location Controller
- * 
- * This file contains controller functions for managing sales locations
+ *
+ * Sales locations and executive check-ins are organization-owned. Route
+ * middleware enforces crm.locations.* permissions; every query here is bounded
+ * by the verified organization.
  */
 
 import pool from '../config/db.js';
 import { logAuditEvent } from '../utils/auditLogger.js';
+import { isActiveMember, parseId, serverError, tenantOf } from '../platform/tenancy.js';
+
+const validManager = async (organizationId, managerId) =>
+  managerId === null || (await isActiveMember(organizationId, managerId));
 
 /**
- * Get all sales locations
  * @route   GET /sales-locations
- * @desc    Get all sales locations
- * @access  Private (Admin and Manager only)
+ * @access  crm.locations.read
  */
 const getSalesLocations = async (req, res) => {
   try {
-    const { roleId } = req.user;
-
-    // Only Admin and Manager can access sales locations
-    if (roleId !== 1 && roleId !== 2) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied. Only Admin and Manager can access sales locations.'
-      });
-    }
-
-    const query = `
-      SELECT sl.*, u.full_name 
-      FROM sales_locations sl
-      LEFT JOIN users u ON sl.manager_id = u.id
-      ORDER BY sl.name
-    `;
-
-    const results = await pool.query(query);
+    const { organizationId } = tenantOf(req);
+    const results = await pool.query(
+      `SELECT sl.*, u.full_name
+       FROM sales_locations sl
+       LEFT JOIN users u ON sl.manager_id = u.id
+       WHERE sl.organization_id = $1
+       ORDER BY sl.name`,
+      [organizationId]
+    );
 
     res.status(200).json({
       success: true,
@@ -40,32 +35,17 @@ const getSalesLocations = async (req, res) => {
       locations: results.rows
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error retrieving sales locations',
-      error: error.message
-    });
+    return serverError(res, 'Error retrieving sales locations', error);
   }
 };
 
 /**
- * Create a new sales location
  * @route   POST /sales-locations
- * @desc    Create a new sales location
- * @access  Private (Admin only)
+ * @access  crm.locations.manage
  */
 const createSalesLocation = async (req, res) => {
   try {
-    const { roleId, userId } = req.user;
-
-    // Only Admin can create sales locations
-    if (roleId !== 1) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied. Only Admin can create sales locations.'
-      });
-    }
-
+    const { organizationId, userId } = tenantOf(req);
     const {
       name,
       address,
@@ -77,7 +57,6 @@ const createSalesLocation = async (req, res) => {
       manager_id
     } = req.body;
 
-    // Validate required fields
     if (!name) {
       return res.status(400).json({
         success: false,
@@ -85,38 +64,24 @@ const createSalesLocation = async (req, res) => {
       });
     }
 
-    const query = `
-      INSERT INTO sales_locations (
-        name, address, city, state, country, pin_code, contact_phone, manager_id
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING *
-    `;
+    const managerId = manager_id ? parseId(manager_id) : null;
+    if ((manager_id && managerId === null) || !(await validManager(organizationId, managerId))) {
+      return res.status(400).json({ success: false, message: 'Manager is not a member of this organization' });
+    }
 
-    const values = [
-      name,
-      address || null,
-      city || null,
-      state || null,
-      country,
-      pin_code || null,
-      contact_phone || null,
-      manager_id || null
-    ];
-
-    const results = await pool.query(query, values);
-
-    // Log the creation
-    await logAuditEvent(
-      userId,
-      'CREATE_SALES_LOCATION',
-      'sales_locations',
-      results.rows[0].id,
-      null,
-      { name, manager_id },
-      req.ip,
-      req.get('User-Agent')
+    const results = await pool.query(
+      `INSERT INTO sales_locations (
+         organization_id, name, address, city, state, country, pin_code, contact_phone, manager_id
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [organizationId, name, address || null, city || null, state || null, country, pin_code || null, contact_phone || null, managerId]
     );
+
+    await logAuditEvent(userId, 'CREATE_SALES_LOCATION', 'sales_locations', results.rows[0].id, null, {
+      name,
+      manager_id: managerId
+    });
 
     res.status(201).json({
       success: true,
@@ -124,101 +89,56 @@ const createSalesLocation = async (req, res) => {
       location: results.rows[0]
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error creating sales location',
-      error: error.message
-    });
+    return serverError(res, 'Error creating sales location', error);
   }
 };
 
 /**
- * Update a sales location
  * @route   PUT /sales-locations/:id
- * @desc    Update a sales location
- * @access  Private (Admin only)
+ * @access  crm.locations.manage
  */
 const updateSalesLocation = async (req, res) => {
   try {
-    const { roleId, userId } = req.user;
+    const { organizationId, userId } = tenantOf(req);
+    const locationId = parseId(req.params.id);
+    const { name, address, city, state, country, pin_code, contact_phone, manager_id } = req.body;
 
-    // Only Admin can update sales locations
-    if (roleId !== 1) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied. Only Admin can update sales locations.'
-      });
+    if (locationId === null) {
+      return res.status(404).json({ success: false, message: 'Sales location not found' });
     }
 
-    const locationId = req.params.id;
-    const {
-      name,
-      address,
-      city,
-      state,
-      country,
-      pin_code,
-      contact_phone,
-      manager_id
-    } = req.body;
-
-    // Check if location exists
-    const checkQuery = 'SELECT * FROM sales_locations WHERE id = $1';
-    const checkResult = await pool.query(checkQuery, [locationId]);
-
+    const checkResult = await pool.query(
+      'SELECT * FROM sales_locations WHERE id = $1 AND organization_id = $2',
+      [locationId, organizationId]
+    );
     if (checkResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Sales location not found'
       });
     }
-
-    // Store old values for audit
     const oldValues = checkResult.rows[0];
 
-    // Update fields
     const updateFields = [];
     const updateValues = [];
-    let paramIndex = 1;
+    const set = (column, value) => {
+      updateValues.push(value);
+      updateFields.push(`${column} = $${updateValues.length}`);
+    };
 
-    if (name !== undefined) {
-      updateFields.push(`name = $${paramIndex++}`);
-      updateValues.push(name);
-    }
-
-    if (address !== undefined) {
-      updateFields.push(`address = $${paramIndex++}`);
-      updateValues.push(address);
-    }
-
-    if (city !== undefined) {
-      updateFields.push(`city = $${paramIndex++}`);
-      updateValues.push(city);
-    }
-
-    if (state !== undefined) {
-      updateFields.push(`state = $${paramIndex++}`);
-      updateValues.push(state);
-    }
-
-    if (country !== undefined) {
-      updateFields.push(`country = $${paramIndex++}`);
-      updateValues.push(country);
-    }
-
-    if (pin_code !== undefined) {
-      updateFields.push(`pin_code = $${paramIndex++}`);
-      updateValues.push(pin_code);
-    }
-
-    if (contact_phone !== undefined) {
-      updateFields.push(`contact_phone = $${paramIndex++}`);
-      updateValues.push(contact_phone);
-    }
-
+    if (name !== undefined) set('name', name);
+    if (address !== undefined) set('address', address);
+    if (city !== undefined) set('city', city);
+    if (state !== undefined) set('state', state);
+    if (country !== undefined) set('country', country);
+    if (pin_code !== undefined) set('pin_code', pin_code);
+    if (contact_phone !== undefined) set('contact_phone', contact_phone);
     if (manager_id !== undefined) {
-      updateFields.push(`manager_id = $${paramIndex++}`);
-      updateValues.push(manager_id);
+      const managerId = manager_id === null || manager_id === '' ? null : parseId(manager_id);
+      if ((manager_id && managerId === null) || !(await validManager(organizationId, managerId))) {
+        return res.status(400).json({ success: false, message: 'Manager is not a member of this organization' });
+      }
+      set('manager_id', managerId);
     }
 
     if (updateFields.length === 0) {
@@ -228,28 +148,15 @@ const updateSalesLocation = async (req, res) => {
       });
     }
 
-    updateValues.push(locationId);
-
-    const updateQuery = `
-      UPDATE sales_locations
-      SET ${updateFields.join(', ')}
-      WHERE id = $${paramIndex}
-      RETURNING *
-    `;
-
-    const results = await pool.query(updateQuery, updateValues);
-
-    // Log the update
-    await logAuditEvent(
-      userId,
-      'UPDATE_SALES_LOCATION',
-      'sales_locations',
-      locationId,
-      oldValues,
-      results.rows[0],
-      req.ip,
-      req.get('User-Agent')
+    updateValues.push(locationId, organizationId);
+    const results = await pool.query(
+      `UPDATE sales_locations SET ${updateFields.join(', ')}
+       WHERE id = $${updateValues.length - 1} AND organization_id = $${updateValues.length}
+       RETURNING *`,
+      updateValues
     );
+
+    await logAuditEvent(userId, 'UPDATE_SALES_LOCATION', 'sales_locations', locationId, oldValues, results.rows[0]);
 
     res.status(200).json({
       success: true,
@@ -257,38 +164,26 @@ const updateSalesLocation = async (req, res) => {
       location: results.rows[0]
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error updating sales location',
-      error: error.message
-    });
+    return serverError(res, 'Error updating sales location', error);
   }
 };
 
 /**
- * Delete a sales location
  * @route   DELETE /sales-locations/:id
- * @desc    Delete a sales location
- * @access  Private (Admin only)
+ * @access  crm.locations.manage
  */
 const deleteSalesLocation = async (req, res) => {
   try {
-    const { roleId, userId } = req.user;
-
-    // Only Admin can delete sales locations
-    if (roleId !== 1) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied. Only Admin can delete sales locations.'
-      });
+    const { organizationId, userId } = tenantOf(req);
+    const locationId = parseId(req.params.id);
+    if (locationId === null) {
+      return res.status(404).json({ success: false, message: 'Sales location not found' });
     }
 
-    const locationId = req.params.id;
-
-    // Check if location exists
-    const checkQuery = 'SELECT * FROM sales_locations WHERE id = $1';
-    const checkResult = await pool.query(checkQuery, [locationId]);
-
+    const checkResult = await pool.query(
+      'SELECT * FROM sales_locations WHERE id = $1 AND organization_id = $2',
+      [locationId, organizationId]
+    );
     if (checkResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -296,10 +191,10 @@ const deleteSalesLocation = async (req, res) => {
       });
     }
 
-    // Check if location is referenced by any leads
-    const leadsCheckQuery = 'SELECT COUNT(*) FROM leads WHERE location_id = $1';
-    const leadsCheckResult = await pool.query(leadsCheckQuery, [locationId]);
-
+    const leadsCheckResult = await pool.query(
+      'SELECT COUNT(*) FROM leads WHERE location_id = $1 AND organization_id = $2',
+      [locationId, organizationId]
+    );
     if (parseInt(leadsCheckResult.rows[0].count) > 0) {
       return res.status(400).json({
         success: false,
@@ -307,59 +202,29 @@ const deleteSalesLocation = async (req, res) => {
       });
     }
 
-    // Store old values for audit
-    const oldValues = checkResult.rows[0];
+    await pool.query('DELETE FROM sales_locations WHERE id = $1 AND organization_id = $2', [locationId, organizationId]);
 
-    // Delete the location
-    const deleteQuery = 'DELETE FROM sales_locations WHERE id = $1';
-    await pool.query(deleteQuery, [locationId]);
-
-    // Log the deletion
-    await logAuditEvent(
-      userId,
-      'DELETE_SALES_LOCATION',
-      'sales_locations',
-      locationId,
-      oldValues,
-      null,
-      req.ip,
-      req.get('User-Agent')
-    );
+    await logAuditEvent(userId, 'DELETE_SALES_LOCATION', 'sales_locations', locationId, checkResult.rows[0], null);
 
     res.status(200).json({
       success: true,
       message: 'Sales location deleted successfully'
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error deleting sales location',
-      error: error.message
-    });
+    return serverError(res, 'Error deleting sales location', error);
   }
 };
 
 /**
- * Update sales executive current location
+ * Report the caller's current location (one row per member per organization)
  * @route   POST /sales-locations/update-location
- * @desc    Update the current location of a sales executive
- * @access  Private (Sales only)
+ * @access  crm.locations.checkin
  */
 const updateSalesExecutiveLocation = async (req, res) => {
   try {
-    const { roleId, userId } = req.user;
-
-    // Only Sales users can update their location
-    if (roleId !== 3) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied. Only Sales users can update their location.'
-      });
-    }
-
+    const { organizationId, userId } = tenantOf(req);
     const { latitude, longitude, address } = req.body;
 
-    // Validate required fields
     if (!latitude || !longitude) {
       return res.status(400).json({
         success: false,
@@ -367,33 +232,15 @@ const updateSalesExecutiveLocation = async (req, res) => {
       });
     }
 
-    // Check if a location record already exists for this user
-    const checkQuery = 'SELECT * FROM user_locations WHERE user_id = $1';
-    const checkResult = await pool.query(checkQuery, [userId]);
-
-    let query;
-    let values;
-
-    if (checkResult.rows.length > 0) {
-      // Update existing record
-      query = `
-        UPDATE user_locations
-        SET latitude = $1, longitude = $2, address = $3, updated_at = CURRENT_TIMESTAMP
-        WHERE user_id = $4
-        RETURNING *
-      `;
-      values = [latitude, longitude, address || null, userId];
-    } else {
-      // Create new record
-      query = `
-        INSERT INTO user_locations (user_id, latitude, longitude, address)
-        VALUES ($1, $2, $3, $4)
-        RETURNING *
-      `;
-      values = [userId, latitude, longitude, address || null];
-    }
-
-    const results = await pool.query(query, values);
+    const results = await pool.query(
+      `INSERT INTO user_locations (organization_id, user_id, latitude, longitude, address)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (organization_id, user_id) DO UPDATE
+         SET latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude,
+             address = EXCLUDED.address, updated_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [organizationId, userId, latitude, longitude, address || null]
+    );
 
     res.status(200).json({
       success: true,
@@ -401,41 +248,35 @@ const updateSalesExecutiveLocation = async (req, res) => {
       location: results.rows[0]
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error updating location',
-      error: error.message
-    });
+    if (error.code === '22003' || error.code === '22P02') {
+      return res.status(400).json({ success: false, message: 'Invalid coordinates' });
+    }
+    return serverError(res, 'Error updating location', error);
   }
 };
 
 /**
- * Get sales executives' current locations
+ * Current locations of the organization's field members (members who may check in)
  * @route   GET /sales-locations/executives
- * @desc    Get current locations of all sales executives
- * @access  Private (Admin and Manager only)
+ * @access  crm.locations.read
  */
 const getSalesExecutivesLocations = async (req, res) => {
   try {
-    const { roleId } = req.user;
-
-    // Only Admin and Manager can access sales executives' locations
-    if (roleId !== 1 && roleId !== 2) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied. Only Admin and Manager can access sales executives locations.'
-      });
-    }
-
-    const query = `
-      SELECT u.id, u.full_name, ul.latitude, ul.longitude, ul.address, ul.updated_at
-      FROM users u
-      LEFT JOIN user_locations ul ON u.id = ul.user_id
-      WHERE u.role_id = 3 AND u.is_active = true
-      ORDER BY u.full_name
-    `;
-
-    const results = await pool.query(query);
+    const { organizationId } = tenantOf(req);
+    const results = await pool.query(
+      `SELECT u.id, u.full_name, ul.latitude, ul.longitude, ul.address, ul.updated_at
+       FROM organization_memberships m
+       JOIN users u ON u.id = m.user_id AND COALESCE(u.is_active, true)
+       LEFT JOIN user_locations ul ON ul.user_id = u.id AND ul.organization_id = m.organization_id
+       WHERE m.organization_id = $1
+         AND m.status = 'active'
+         AND EXISTS (
+           SELECT 1 FROM role_permissions rp
+           WHERE rp.role_id = m.role_id AND rp.permission_key = 'crm.locations.checkin'
+         )
+       ORDER BY u.full_name`,
+      [organizationId]
+    );
 
     res.status(200).json({
       success: true,
@@ -443,11 +284,7 @@ const getSalesExecutivesLocations = async (req, res) => {
       executives: results.rows
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error retrieving sales executives locations',
-      error: error.message
-    });
+    return serverError(res, 'Error retrieving sales executives locations', error);
   }
 };
 

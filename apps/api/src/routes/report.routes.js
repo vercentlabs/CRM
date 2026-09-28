@@ -1,48 +1,27 @@
 import express from 'express';
 const router = express.Router();
 import { getDashboardSummary, getSalesPerformance, getLeadAging, getConversionReport, exportLeadsCSV, getLeadsOverTime } from '../controllers/report.controller.js';
-import authenticateToken from '../middleware/auth.middleware.js';
+import authenticateToken, { requirePermission, requireScope } from '../middleware/auth.middleware.js';
 
-/**
- * @route   GET /dashboard-summary
- * @desc    Get dashboard summary with key metrics
- * @access  Private
- */
-router.get('/dashboard-summary', authenticateToken, getDashboardSummary);
+// Every report aggregates only the caller's organization (and own records for own scope).
+router.use(authenticateToken);
 
-/**
- * @route   GET /sales-performance
- * @desc    Get performance metrics for each sales user
- * @access  Private (Admin/Manager only)
- */
-router.get('/sales-performance', authenticateToken, getSalesPerformance);
+/** @route GET /reports/dashboard-summary */
+router.get('/dashboard-summary', requirePermission('crm.reports.read'), getDashboardSummary);
 
-/**
- * @route   GET /lead-aging
- * @desc    Get lead aging distribution in time buckets
- * @access  Private
- */
-router.get('/lead-aging', authenticateToken, getLeadAging);
+/** @route GET /reports/sales-performance (per-member metrics: organization scope only) */
+router.get('/sales-performance', requireScope('crm.reports.read', 'organization'), getSalesPerformance);
 
-/**
- * @route   GET /conversion-report
- * @desc    Get lead conversion funnel by status
- * @access  Private
- */
-router.get('/conversion-report', authenticateToken, getConversionReport);
+/** @route GET /reports/lead-aging */
+router.get('/lead-aging', requirePermission('crm.reports.read'), getLeadAging);
 
-/**
- * @route   GET /export-leads-csv
- * @desc    Export leads data as CSV file with role-based filtering
- * @access  Private
- */
-router.get('/export-leads-csv', authenticateToken, exportLeadsCSV);
+/** @route GET /reports/conversion-report */
+router.get('/conversion-report', requirePermission('crm.reports.read'), getConversionReport);
 
-/**
- * @route   GET /leads-over-time
- * @desc    Get leads data grouped by time period (today, this week, this month)
- * @access  Private
- */
-router.get('/leads-over-time', authenticateToken, getLeadsOverTime);
+/** @route GET /reports/export-leads-csv */
+router.get('/export-leads-csv', requirePermission('crm.reports.export'), exportLeadsCSV);
+
+/** @route GET /reports/leads-over-time */
+router.get('/leads-over-time', requirePermission('crm.reports.read'), getLeadsOverTime);
 
 export default router;

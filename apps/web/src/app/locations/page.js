@@ -25,11 +25,7 @@ const SalesLocationsPage = () => {
       setLoading(true);
       setError(null);
 
-      const response = await axios.get('/sales-locations', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await axios.get('/sales-locations');
 
       setLocations(response.data.locations || []);
     } catch (err) {
@@ -46,7 +42,7 @@ const SalesLocationsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   // Fetch locations on component mount
   useEffect(() => {

@@ -1,7 +1,7 @@
 import bcrypt from 'bcrypt';
 import { randomBytes } from 'node:crypto';
 import { withTransaction } from '@crm/database';
-import { builtInRoleKeyForLegacyId, coversGrants, type GrantMap } from '@crm/permissions';
+import { coversGrants, type GrantMap } from '@crm/permissions';
 import type { Member } from '@crm/types';
 import type { updateMemberSchema } from '@crm/validation';
 import type { z } from 'zod';
@@ -25,12 +25,8 @@ function assertWithin(actor: Actor, grants: GrantMap, message: string) {
   if (!coversGrants(actor.permissions, grants)) throw AppError.forbidden(message);
 }
 
-export async function resolveRole(
-  actor: Actor,
-  selector: { roleKey?: string | undefined; legacyRoleId?: unknown },
-) {
-  const key = selector.roleKey || builtInRoleKeyForLegacyId(selector.legacyRoleId);
-  const role = key ? await orgs.findAssignableRole(pool, actor, key) : null;
+export async function resolveRole(actor: Actor, roleKey: string) {
+  const role = await orgs.findAssignableRole(pool, actor, roleKey);
   if (!role) throw AppError.validation([{ field: 'role_key', message: 'Unknown role' }]);
   return role;
 }
@@ -89,22 +85,9 @@ export async function setStatus(
   });
 }
 
-/** Legacy toggle: active ⇄ suspended (invitations must be accepted first). */
-export async function toggleStatus(actor: Actor, targetUserId: number): Promise<Member> {
-  const current = await getMember(actor, targetUserId);
-  if (current.membership_status === 'invited')
-    throw AppError.conflict('The invitation has not been accepted yet');
-  await setStatus(
-    actor,
-    targetUserId,
-    current.membership_status === 'active' ? 'suspended' : 'active',
-  );
-  return getMember(actor, targetUserId);
-}
-
 export async function updateMember(actor: Actor, targetUserId: number, input: MemberUpdate) {
   if (input.roleKey !== undefined)
-    await changeRole(actor, targetUserId, await resolveRole(actor, { roleKey: input.roleKey }));
+    await changeRole(actor, targetUserId, await resolveRole(actor, input.roleKey));
   if (input.status !== undefined) await setStatus(actor, targetUserId, input.status);
   return getMember(actor, targetUserId);
 }

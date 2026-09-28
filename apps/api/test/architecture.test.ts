@@ -5,8 +5,9 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * Layering rules of the modular monolith (docs/architecture/API.md):
- * routes/controllers/legacy adapters never touch SQL; services and
- * repositories never touch Express; no JavaScript backend sources remain.
+ * routes/controllers never touch SQL; services and repositories never touch
+ * Express; no JavaScript backend sources remain; the pre-v1 compatibility
+ * layer (removed in Phase 5) stays removed.
  */
 
 const src = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
@@ -26,7 +27,7 @@ const moduleFiles = all.filter(
 const rel = (f: string) => path.relative(src, f).split(path.sep).join('/');
 const read = (f: string) => readFileSync(f, 'utf8');
 
-const httpLayer = moduleFiles.filter((f) => /\.(controller|routes|legacy|webhooks)\.ts$/.test(f));
+const httpLayer = moduleFiles.filter((f) => /\.(controller|routes|webhooks)\.ts$/.test(f));
 const domainLayer = moduleFiles.filter((f) => /\.(service|repository)\.ts$/.test(f));
 
 describe('architecture', () => {
@@ -35,7 +36,7 @@ describe('architecture', () => {
     expect(domainLayer.length).toBeGreaterThan(20);
   });
 
-  it('keeps SQL out of routes, controllers and legacy adapters', () => {
+  it('keeps SQL out of routes and controllers', () => {
     const offenders = httpLayer.filter((f) => {
       const text = read(f);
       return (
@@ -50,6 +51,30 @@ describe('architecture', () => {
     const offenders = domainLayer.filter((f) =>
       /from 'express'|\bres\.(status|json|send)\(|\breq\.(body|params|query)\b/.test(read(f)),
     );
+    expect(offenders.map(rel)).toEqual([]);
+  });
+
+  it('has no legacy compatibility layer (Phase 5)', () => {
+    const legacyFiles = all.filter((f) =>
+      /\.legacy\.ts$|legacy-response\.ts$|[\\/]http[\\/]legacy\.ts$/.test(f),
+    );
+    expect(legacyFiles.map(rel)).toEqual([]);
+    const offenders = all.filter((f) =>
+      /createLegacyRouter|legacyRoute\(|legacy[A-Z]\w*Router|'Deprecation'/.test(read(f)),
+    );
+    expect(offenders.map(rel)).toEqual([]);
+  });
+
+  it('exposes no legacy numeric role id in DTOs or queries', () => {
+    // Internal `roleId` names the membership's role row (roles.id); what is
+    // gone is the legacy 1/2/3 alias (users.role_id, roles.legacy_role_id).
+    const offenders = all
+      .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+      .filter((f) =>
+        /legacy_role_id|legacyRoleId|sender_role_id|\busers\.role_id\b|\bu\.role_id\b|roleId: subject|z\.object\(\{[^}]*\brole_id\b/.test(
+          read(f),
+        ),
+      );
     expect(offenders.map(rel)).toEqual([]);
   });
 

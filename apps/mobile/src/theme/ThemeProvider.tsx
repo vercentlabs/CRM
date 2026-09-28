@@ -1,69 +1,70 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useColorScheme } from 'react-native';
 import { darkTheme, lightTheme, type Theme } from './index';
-import {
-  getStoredTheme,
-  setStoredTheme,
-  type ThemePreference
-} from '../services/themeStorage';
 
-type ThemeContextValue = {
+export type ThemePreference = 'light' | 'dark' | 'system';
+
+/** A per-device display preference (not account data), so AsyncStorage is appropriate. */
+const THEME_KEY = 'crm.theme';
+
+interface ThemeContextValue {
   theme: Theme;
   mode: ThemePreference;
   resolvedMode: 'light' | 'dark';
   setMode: (mode: ThemePreference) => void;
-  toggleMode: () => void;
-};
+}
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
-export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
+export function ThemeProvider({ children }: { children: ReactNode }) {
   const systemScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const [mode, setModeState] = useState<ThemePreference>('system');
 
   useEffect(() => {
     let active = true;
-    const load = async () => {
-      const stored = await getStoredTheme();
-      if (active && stored) {
-        setModeState(stored);
-      }
-    };
-    void load();
+    AsyncStorage.getItem(THEME_KEY)
+      .then((stored) => {
+        if (active && (stored === 'light' || stored === 'dark' || stored === 'system'))
+          setModeState(stored);
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
   }, []);
 
-  const resolvedMode = mode === 'system' ? systemScheme : mode;
-  const theme = resolvedMode === 'dark' ? darkTheme : lightTheme;
-
-  const setMode = (next: ThemePreference) => {
+  const setMode = useCallback((next: ThemePreference) => {
     setModeState(next);
-    void setStoredTheme(next);
-  };
+    AsyncStorage.setItem(THEME_KEY, next).catch(() => undefined);
+  }, []);
 
-  const toggleMode = () => {
-    const next = resolvedMode === 'dark' ? 'light' : 'dark';
-    setMode(next);
-  };
-
-  const value = {
-    theme,
-    mode,
-    resolvedMode,
-    setMode,
-    toggleMode
-  };
-
+  const resolvedMode = mode === 'system' ? systemScheme : mode;
+  const value = useMemo(
+    () => ({
+      theme: resolvedMode === 'dark' ? darkTheme : lightTheme,
+      mode,
+      resolvedMode,
+      setMode,
+    }),
+    [mode, resolvedMode, setMode],
+  );
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
-};
+}
 
-export const useTheme = () => {
+export function useTheme(): ThemeContextValue {
   const ctx = useContext(ThemeContext);
-  if (!ctx) {
-    throw new Error('useTheme must be used within a ThemeProvider');
-  }
+  if (!ctx) throw new Error('useTheme must be used within a ThemeProvider');
   return ctx;
-};
+}
 
+/** Shorthand for the current colour tokens. */
+export const useColors = () => useTheme().theme.colors;

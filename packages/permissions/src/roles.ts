@@ -22,18 +22,16 @@ const adminGrants: PermissionGrants = Object.fromEntries(
 
 export const BUILT_IN_ROLES: Record<
   BuiltInRoleKey,
-  { name: string; description: string; legacyRoleId: 1 | 2 | 3; grants: PermissionGrants }
+  { name: string; description: string; grants: PermissionGrants }
 > = {
   admin: {
     name: 'Admin',
     description: 'Full access to the organization',
-    legacyRoleId: 1,
     grants: adminGrants,
   },
   manager: {
     name: 'Manager',
     description: 'Organization-wide CRM access and reports',
-    legacyRoleId: 2,
     grants: {
       'crm.leads.read': org,
       'crm.leads.create': org,
@@ -71,7 +69,6 @@ export const BUILT_IN_ROLES: Record<
   sales: {
     name: 'Sales',
     description: 'Works own leads, customers and opportunities',
-    legacyRoleId: 3,
     grants: {
       'crm.leads.read': own,
       'crm.leads.create': own,
@@ -108,27 +105,4 @@ export const BUILT_IN_ROLES: Record<
 
 export function isBuiltInRoleKey(value: unknown): value is BuiltInRoleKey {
   return typeof value === 'string' && (BUILT_IN_ROLE_KEYS as readonly string[]).includes(value);
-}
-
-/**
- * DEPRECATED numeric role ids (1 Admin, 2 Manager, 3 Sales) from `users.role_id`.
- * Kept only so legacy clients can keep rendering role-dependent UI from the
- * `roleId` field in API responses. Never use them for authorization.
- */
-export const LEGACY_ROLE_IDS = {
-  ADMIN: 1,
-  MANAGER: 2,
-  SALES: 3,
-} as const;
-
-export type LegacyRoleName = keyof typeof LEGACY_ROLE_IDS;
-export type LegacyRoleId = (typeof LEGACY_ROLE_IDS)[LegacyRoleName];
-
-export function isLegacyRoleId(value: unknown): value is LegacyRoleId {
-  return Object.values(LEGACY_ROLE_IDS).includes(value as LegacyRoleId);
-}
-
-export function builtInRoleKeyForLegacyId(value: unknown): BuiltInRoleKey | undefined {
-  const id = typeof value === 'string' ? Number(value) : value;
-  return BUILT_IN_ROLE_KEYS.find((key) => BUILT_IN_ROLES[key].legacyRoleId === id);
 }

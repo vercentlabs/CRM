@@ -1,98 +1,70 @@
+/**
+ * Mobile colour tokens. Same palette as the web design system
+ * (packages/ui/theme.css) so both clients read as one product; text colours
+ * meet WCAG AA on their surfaces in both modes.
+ */
 export type ThemeColors = {
-  background: string;
-  foreground: string;
-  card: string;
-  cardForeground: string;
-  border: string;
-  inputBg: string;
-  inputBorder: string;
-  primary: string;
-  primaryForeground: string;
-  secondary: string;
-  secondaryForeground: string;
+  bg: string;
+  surface: string;
+  surfaceMuted: string;
+  fg: string;
   muted: string;
-  mutedForeground: string;
-  accent: string;
-  accentForeground: string;
-  destructive: string;
-  warning: string;
+  border: string;
+  borderStrong: string;
+  primary: string;
+  primaryFg: string;
+  primarySoft: string;
+  danger: string;
+  dangerSoft: string;
   success: string;
-  appShell: string;
-  appSidebar: string;
-  appTopbar: string;
-  appHover: string;
-  searchBg: string;
-  searchBorder: string;
-  searchText: string;
-  brand: string;
-  brandSoft: string;
-  brandMuted: string;
-  screenGradient: readonly [string, string, ...string[]];
-  authGradient: readonly [string, string, ...string[]];
+  successSoft: string;
+  warning: string;
+  warningSoft: string;
+  info: string;
+  infoSoft: string;
+  overlay: string;
 };
 
 export const lightColors: ThemeColors = {
-  background: '#f8fafc',
-  foreground: '#1e293b',
-  card: '#ffffff',
-  cardForeground: '#1e293b',
-  border: '#e2e8f0',
-  inputBg: '#ffffff',
-  inputBorder: '#e2e8f0',
-  primary: '#000000',
-  primaryForeground: '#ffffff',
-  secondary: '#f1f5f9',
-  secondaryForeground: '#334155',
-  muted: '#f1f5f9',
-  mutedForeground: '#64748b',
-  accent: '#f1f5f9',
-  accentForeground: '#334155',
-  destructive: '#dc2626',
-  warning: '#d97706',
-  success: '#059669',
-  appShell: '#f8fafc',
-  appSidebar: '#ffffff',
-  appTopbar: '#ffffff',
-  appHover: '#f1f5f9',
-  searchBg: '#eff6ff',
-  searchBorder: '#93c5fd',
-  searchText: '#111827',
-  brand: '#4f46e5',
-  brandSoft: '#8b5cf6',
-  brandMuted: 'rgba(79, 70, 229, 0.12)',
-  screenGradient: ['#f8fafc', '#f1f5f9', '#eef2ff'],
-  authGradient: ['#eef2ff', '#ffffff', '#faf5ff']
+  bg: '#f6f7f9',
+  surface: '#ffffff',
+  surfaceMuted: '#f1f3f6',
+  fg: '#111827',
+  muted: '#5b6474',
+  border: '#e1e5eb',
+  borderStrong: '#c9d0da',
+  primary: '#2f54d9',
+  primaryFg: '#ffffff',
+  primarySoft: '#e8edfd',
+  danger: '#c62828',
+  dangerSoft: '#fdecec',
+  success: '#1b7a45',
+  successSoft: '#e6f4ec',
+  warning: '#9a5b00',
+  warningSoft: '#fdf3e2',
+  info: '#1f5fa8',
+  infoSoft: '#e7f0fb',
+  overlay: 'rgba(15, 23, 42, 0.45)',
 };
 
 export const darkColors: ThemeColors = {
-  background: '#0b1120',
-  foreground: '#e2e8f0',
-  card: '#111827',
-  cardForeground: '#e2e8f0',
-  border: '#1f2937',
-  inputBg: '#0f172a',
-  inputBorder: '#1f2937',
-  primary: '#6366f1',
-  primaryForeground: '#f8fafc',
-  secondary: '#111827',
-  secondaryForeground: '#cbd5e1',
-  muted: '#0f172a',
-  mutedForeground: '#94a3b8',
-  accent: '#0f172a',
-  accentForeground: '#cbd5e1',
-  destructive: '#dc2626',
-  warning: '#d97706',
-  success: '#059669',
-  appShell: '#0b1120',
-  appSidebar: '#0f172a',
-  appTopbar: '#0b1120',
-  appHover: 'rgba(255, 255, 255, 0.06)',
-  searchBg: '#0f172a',
-  searchBorder: '#334155',
-  searchText: '#e2e8f0',
-  brand: '#6366f1',
-  brandSoft: '#8b5cf6',
-  brandMuted: 'rgba(99, 102, 241, 0.2)',
-  screenGradient: ['#0b1120', '#0f172a', '#1e1b4b'],
-  authGradient: ['#0f172a', '#0b1120', '#1e1b4b']
+  bg: '#0e1116',
+  surface: '#161a21',
+  surfaceMuted: '#1d222b',
+  fg: '#e6e9ef',
+  muted: '#9aa3b2',
+  border: '#2a303b',
+  borderStrong: '#3a4250',
+  primary: '#6b8cff',
+  primaryFg: '#0b1020',
+  primarySoft: '#1d2a52',
+  danger: '#ff7b72',
+  dangerSoft: '#3a1d1d',
+  success: '#5cc98b',
+  successSoft: '#173325',
+  warning: '#f0b35a',
+  warningSoft: '#3a2b12',
+  info: '#79b0ff',
+  infoSoft: '#172a45',
+  overlay: 'rgba(0, 0, 0, 0.6)',
 };

@@ -12,25 +12,15 @@ export const listSchedule = (actor: Actor, overdueOnly: boolean) =>
   });
 
 /**
- * Changes a follow-up's status. Own scope may only change follow-ups assigned
- * to them. 'Overdue' is kept for the legacy endpoint but is rejected by the
- * followups_status_check constraint (Pending/Completed/Cancelled), exactly as
- * before Phase 3.
+ * Completes a follow-up. Own scope may only complete follow-ups assigned to
+ * them. "Overdue" is derived from the date, never stored.
  */
-async function setStatus(
-  actor: Actor,
-  id: number,
-  status: 'Completed' | 'Overdue',
-  action: string,
-): Promise<Followup> {
+export async function completeFollowup(actor: Actor, id: number): Promise<Followup> {
+  const status = 'Completed';
   const current = await followups.findById(pool, actor, id);
   if (!current) throw AppError.notFound('Followup not found');
   if (ownerFilter(actor, 'crm.followups.update') !== null && current.assigned_to !== actor.userId) {
-    throw AppError.forbidden(
-      status === 'Completed'
-        ? 'You can only complete your own followups'
-        : 'You can only mark your own followups as overdue',
-    );
+    throw AppError.forbidden('You can only complete your own followups');
   }
   try {
     await followups.setStatus(pool, actor, id, status);
@@ -41,7 +31,7 @@ async function setStatus(
     throw error;
   }
   await recordAuditEvent({
-    action,
+    action: 'COMPLETE_FOLLOWUP',
     tableName: 'followups',
     recordId: id,
     newValues: {
@@ -53,8 +43,3 @@ async function setStatus(
   });
   return (await followups.findById(pool, actor, id))!;
 }
-
-export const completeFollowup = (actor: Actor, id: number) =>
-  setStatus(actor, id, 'Completed', 'COMPLETE_FOLLOWUP');
-export const markFollowupOverdue = (actor: Actor, id: number) =>
-  setStatus(actor, id, 'Overdue', 'MARK_FOLLOWUP_OVERDUE');

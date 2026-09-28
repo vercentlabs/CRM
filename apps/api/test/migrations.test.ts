@@ -22,7 +22,7 @@ const TENANT_TABLES = [
   'audit_logs',
 ] as const;
 
-describe.skipIf(!hasTestDatabase)('Phase 2 migrations', () => {
+describe.skipIf(!hasTestDatabase)('database migrations (0001 → 0004)', () => {
   describe('A. empty database', () => {
     let db: TestSchema;
     beforeAll(async () => {
@@ -34,12 +34,28 @@ describe.skipIf(!hasTestDatabase)('Phase 2 migrations', () => {
       const orgs = await db.pool.query('SELECT count(*) FROM organizations');
       expect(Number(orgs.rows[0].count)).toBe(0);
       expect(Number((await db.pool.query('SELECT count(*) FROM settings')).rows[0].count)).toBe(0);
-      const roles = await db.pool.query('SELECT id, key, legacy_role_id FROM roles ORDER BY id');
+      const roles = await db.pool.query('SELECT id, key FROM roles ORDER BY id');
       expect(roles.rows).toEqual([
-        { id: 1, key: 'admin', legacy_role_id: 1 },
-        { id: 2, key: 'manager', legacy_role_id: 2 },
-        { id: 3, key: 'sales', legacy_role_id: 3 },
+        { id: 1, key: 'admin' },
+        { id: 2, key: 'manager' },
+        { id: 3, key: 'sales' },
       ]);
+    });
+
+    it('has no legacy numeric role columns or role-dependent procedures (0004)', async () => {
+      const columns = await db.pool.query(
+        `SELECT table_name, column_name FROM information_schema.columns
+         WHERE table_schema = $1 AND ((table_name = 'users' AND column_name = 'role_id')
+            OR (table_name = 'roles' AND column_name = 'legacy_role_id'))`,
+        [db.schema],
+      );
+      expect(columns.rows).toEqual([]);
+      const procedures = await db.pool.query(
+        `SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = $1 AND p.proname = 'assign_leads_to_sales'`,
+        [db.schema],
+      );
+      expect(procedures.rows).toEqual([]);
     });
 
     it('seeds exactly the permission vocabulary and role grants from @crm/permissions', async () => {
@@ -252,27 +268,44 @@ describe.skipIf(!hasTestDatabase)('Phase 2 migrations', () => {
     it('lets existing users sign in and see their migrated data', async () => {
       process.env.DATABASE_URL = db.url;
       server = await startApp();
-      const login = await call(server.baseUrl, 'POST', '/auth/login', {
-        body: { email: 'sales@legacy.test', password: 'Legacy123pass' },
+      const login = await call(server.baseUrl, 'POST', '/api/v1/auth/login', {
+        body: { email: 'sales@legacy.test', password: 'Legacy123pass', client: 'mobile' },
       });
       expect(login.status).toBe(200);
-      expect(login.body.data.user.roleId).toBe(3);
-      const leads = await call(server.baseUrl, 'GET', '/leads', { token: login.body.data.token });
-      expect(leads.body.leads.map((l: { id: number }) => l.id)).toEqual([ids.lead]);
+      expect(login.body.data.membership.role.key).toBe('sales');
+      expect(login.body.data.user).not.toHaveProperty('roleId');
+      const leads = await call(server.baseUrl, 'GET', '/api/v1/leads', {
+        token: login.body.data.accessToken,
+      });
+      expect(leads.body.data.map((l: { id: number }) => l.id)).toEqual([ids.lead]);
 
-      const former = await call(server.baseUrl, 'POST', '/auth/login', {
-        body: { email: 'former@legacy.test', password: 'Legacy123pass' },
+      const former = await call(server.baseUrl, 'POST', '/api/v1/auth/login', {
+        body: { email: 'former@legacy.test', password: 'Legacy123pass', client: 'mobile' },
       });
       expect(former.status).toBe(401);
 
-      const admin = await call(server.baseUrl, 'POST', '/auth/login', {
-        body: { email: 'admin@legacy.test', password: 'Legacy123pass' },
+      const admin = await call(server.baseUrl, 'POST', '/api/v1/auth/login', {
+        body: { email: 'admin@legacy.test', password: 'Legacy123pass', client: 'mobile' },
       });
-      const settings = await call(server.baseUrl, 'GET', '/settings', {
-        token: admin.body.data.token,
+      expect(admin.body.data.membership.role.key).toBe('admin');
+      const settings = await call(server.baseUrl, 'GET', '/api/v1/settings', {
+        token: admin.body.data.accessToken,
       });
-      expect(settings.body.data.settings.site_name).toBe('Legacy Co');
-      expect(Object.keys(settings.body.data.settings)).toHaveLength(before.settings!);
+      expect(settings.body.data.site_name).toBe('Legacy Co');
+      expect(Object.keys(settings.body.data)).toHaveLength(before.settings!);
+    });
+
+    it('drops the legacy role ids only after they were copied into memberships', async () => {
+      const columns = await db.pool.query(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = 'users' AND column_name = 'role_id'`,
+        [db.schema],
+      );
+      expect(columns.rows).toEqual([]);
+      const roles = await db.pool.query(
+        'SELECT id, key FROM roles WHERE id IN (1, 2, 3) ORDER BY id',
+      );
+      expect(roles.rows.map((r) => r.key)).toEqual(['admin', 'manager', 'sales']);
     });
   });
 });

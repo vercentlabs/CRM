@@ -100,12 +100,3 @@ export async function assertMember(
     ]);
   }
 }
-
-/** Positive integer id or null (legacy adapters answer malformed ids with 404). */
-export function parseId(value: unknown): number | null {
-  const text =
-    typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
-  if (!/^\d{1,10}$/.test(text)) return null;
-  const id = Number(text);
-  return id > 0 && id <= 2_147_483_647 ? id : null;
-}

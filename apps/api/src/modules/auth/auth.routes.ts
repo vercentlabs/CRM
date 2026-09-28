@@ -197,7 +197,6 @@ const sessionSchema = z.object({
   user: z.object({
     id: z.number(),
     email: z.string(),
-    roleId: z.number().nullable(),
     name: z.string(),
   }),
   organization: z.object({ id: z.uuid(), name: z.string(), slug: z.string() }),

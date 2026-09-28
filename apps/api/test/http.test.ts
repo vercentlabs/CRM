@@ -33,12 +33,10 @@ afterAll(async () => {
 });
 
 describe('health endpoints', () => {
-  it('keeps the legacy /health response shape', async () => {
+  it('no longer serves the pre-v1 /health (use /api/v1/health/live)', async () => {
     const res = await fetch(`${baseUrl}/health`);
-    expect(res.status).toBe(200);
-    const body = await json(res);
-    expect(body).toMatchObject({ status: 'OK' });
-    expect(typeof body.uptime).toBe('number');
+    expect(res.status).toBe(404);
+    expect(await json(res)).toMatchObject({ success: false, error: { code: 'NOT_FOUND' } });
   });
 
   it('serves /api/v1/health/live with the v1 envelope and a request id', async () => {
@@ -87,15 +85,18 @@ describe('error handling', () => {
     expect(body.error.requestId).toBe(res.headers.get('x-request-id'));
   });
 
-  it('returns a safe JSON 400 for malformed JSON on legacy routes', async () => {
-    const res = await fetch(`${baseUrl}/auth/login`, {
+  it('returns a safe JSON 400 for malformed JSON', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/auth/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{"email":',
     });
     expect(res.status).toBe(400);
     const body = await json(res);
-    expect(body).toMatchObject({ success: false, message: 'Malformed JSON request body' });
+    expect(body).toMatchObject({
+      success: false,
+      error: { code: 'BAD_REQUEST', message: 'Malformed JSON request body' },
+    });
     expect(JSON.stringify(body)).not.toMatch(/at .*\.js|stack/i);
   });
 
@@ -137,16 +138,65 @@ describe('error handling', () => {
 
 describe('authentication guards', () => {
   it('rejects unauthenticated lead-message status updates', async () => {
-    const res = await fetch(`${baseUrl}/api/lead-messages/1/status`, {
-      method: 'PUT',
+    const res = await fetch(`${baseUrl}/api/v1/messages/1/status`, {
+      method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ status: 'Delivered' }),
     });
     expect(res.status).toBe(401);
   });
 
-  it('still requires a token on protected legacy routes', async () => {
-    const res = await fetch(`${baseUrl}/leads`);
+  it('requires a token on protected routes', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/leads`);
     expect(res.status).toBe(401);
+  });
+});
+
+describe('removed pre-v1 routes', () => {
+  // Phase 5 removed every unversioned client route. They must never be
+  // remounted: each answers the standard JSON 404 without authentication or
+  // side effects. Provider webhooks (/api/plivo/*) are the only non-v1 routes.
+  const OLD_ROUTES: Array<[method: string, path: string]> = [
+    ['POST', '/auth/login'],
+    ['POST', '/auth/refresh-token'],
+    ['GET', '/users'],
+    ['GET', '/users/me'],
+    ['POST', '/admin/users'],
+    ['GET', '/leads'],
+    ['POST', '/leads'],
+    ['GET', '/followups/overdue'],
+    ['POST', '/calls/initiate'],
+    ['GET', '/messages'],
+    ['POST', '/api/lead-messages/send'],
+    ['GET', '/customers'],
+    ['GET', '/gold/gold-rate'],
+    ['GET', '/reports/dashboard-summary'],
+    ['GET', '/audit'],
+    ['GET', '/sales-locations'],
+    ['GET', '/opportunities'],
+    ['GET', '/tasks'],
+    ['GET', '/notes'],
+    ['GET', '/calendar'],
+    ['GET', '/api/chat/conversations'],
+    ['GET', '/settings'],
+    ['POST', '/api/upload/chat-file'],
+    ['GET', '/health'],
+  ];
+
+  it.each(OLD_ROUTES)('%s %s answers a JSON 404', async (method, path) => {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', authorization: 'Bearer anything' },
+      ...(method === 'GET' ? {} : { body: '{}' }),
+    });
+    expect(res.status).toBe(404);
+    expect(res.headers.get('deprecation')).toBeNull();
+    const body = await json(res);
+    expect(body).toMatchObject({ success: false, error: { code: 'NOT_FOUND' } });
+  });
+
+  it('keeps the Plivo webhook URLs mounted (signature-verified, not 404)', async () => {
+    const res = await fetch(`${baseUrl}/api/plivo/webhook/status`, { method: 'POST' });
+    expect(res.status).not.toBe(404);
   });
 });

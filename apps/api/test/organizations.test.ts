@@ -135,40 +135,49 @@ describe.skipIf(!hasTestDatabase)('organizations and memberships', () => {
       roleKey: 'admin',
     });
     expect(grant.status).toBe(403);
-    const legacyGrant = await as('um', 'PUT', `/users/${fx.users.aSales.id}`, {
-      full_name: 'User a_sales',
-      email: fx.users.aSales.email,
-      username: 'a_sales',
-      role_id: 1,
-    });
-    expect(legacyGrant.status).toBe(403);
-    const suspendAdmin = await as('um', 'PATCH', `/users/${fx.users.aAdmin.id}/status`);
+    const suspendAdmin = await as(
+      'um',
+      'PATCH',
+      `/api/v1/organization/members/${fx.users.aAdmin.id}`,
+      {
+        status: 'suspended',
+      },
+    );
     expect(suspendAdmin.status).toBe(403);
-    const createAdmin = await as('um', 'POST', '/users', {
+    const createAdmin = await as('um', 'POST', '/api/v1/organization/members', {
       full_name: 'Sneaky',
       email: 'sneaky@example.test',
       password: 'Passw0rd123',
-      roleId: 1,
+      roleKey: 'admin',
     });
     expect(createAdmin.status).toBe(403);
+    // A numeric role id is not a way in: the field is unknown and no role is resolved from it.
+    const numericRole = await as('um', 'POST', '/api/v1/organization/members', {
+      full_name: 'Sneaky Two',
+      email: 'sneaky2@example.test',
+      password: 'Passw0rd123',
+      roleId: 1,
+    });
+    expect(numericRole.status).toBe(400);
   });
 
   it('creates new members with a validated password', async () => {
-    const weak = await as('aAdmin', 'POST', '/users', {
+    const weak = await as('aAdmin', 'POST', '/api/v1/organization/members', {
       full_name: 'Weak',
       email: 'weak@example.test',
       password: 'short',
-      roleId: 3,
+      roleKey: 'sales',
     });
     expect(weak.status).toBe(400);
-    const created = await as('aAdmin', 'POST', '/users', {
+    const created = await as('aAdmin', 'POST', '/api/v1/organization/members', {
       full_name: 'New Rep',
       email: 'newrep@example.test',
       password: 'Passw0rd123',
-      roleId: 3,
+      roleKey: 'sales',
     });
     expect(created.status).toBe(201);
-    expect(created.body.user).toMatchObject({
+    expect(created.body.data).not.toHaveProperty('role_id');
+    expect(created.body.data).toMatchObject({
       email: 'newrep@example.test',
       role_key: 'sales',
       membership_status: 'active',
@@ -180,14 +189,14 @@ describe.skipIf(!hasTestDatabase)('organizations and memberships', () => {
   });
 
   it('invites existing identities without modifying them', async () => {
-    const invite = await as('aAdmin', 'POST', '/users', {
+    const invite = await as('aAdmin', 'POST', '/api/v1/organization/members', {
       full_name: 'Hijacked Name',
       email: fx.users.bAdmin.email,
       password: 'Attack3rPass',
-      roleId: 3,
+      roleKey: 'sales',
     });
     expect(invite.status).toBe(201);
-    expect(invite.body.user.membership_status).toBe('invited');
+    expect(invite.body.data.membership_status).toBe('invited');
 
     // Identity untouched: old password still works, name unchanged, and org B is still the default.
     const user = (
@@ -234,26 +243,35 @@ describe.skipIf(!hasTestDatabase)('organizations and memberships', () => {
   });
 
   it('does not let one tenant edit the identity of a user shared with another tenant', async () => {
-    const res = await as('aAdmin', 'PUT', `/users/${fx.users.multi.id}`, {
-      full_name: 'Renamed',
-      email: fx.users.multi.email,
-      username: 'multi',
-      role_id: 3,
-    });
+    const res = await as(
+      'aAdmin',
+      'PUT',
+      `/api/v1/organization/members/${fx.users.multi.id}/profile`,
+      {
+        full_name: 'Renamed',
+        email: fx.users.multi.email,
+        username: 'multi',
+      },
+    );
     expect(res.status).toBe(403);
-    const exclusive = await as('aAdmin', 'PUT', `/users/${fx.users.aSales.id}`, {
-      full_name: 'Renamed Sales',
-      email: fx.users.aSales.email,
-      username: 'a_sales',
-      role_id: 3,
-    });
+    const exclusive = await as(
+      'aAdmin',
+      'PUT',
+      `/api/v1/organization/members/${fx.users.aSales.id}/profile`,
+      {
+        full_name: 'Renamed Sales',
+        email: fx.users.aSales.email,
+        username: 'a_sales',
+      },
+    );
     expect(exclusive.status).toBe(200);
-    expect(exclusive.body.user.full_name).toBe('Renamed Sales');
+    expect(exclusive.body.data.full_name).toBe('Renamed Sales');
   });
 
-  it('keeps /users/me tenant-aware', async () => {
-    const me = await as('multi', 'GET', '/users/me');
-    expect(me.body.user.organization.id).toBe(fx.orgA.publicId);
-    expect(me.body.user.permissions['crm.leads.read']).toBe('own');
+  it('keeps the session view tenant-aware', async () => {
+    const me = await as('multi', 'GET', '/api/v1/auth/session');
+    expect(me.body.data.organization.id).toBe(fx.orgA.publicId);
+    expect(me.body.data.permissions['crm.leads.read']).toBe('own');
+    expect(me.body.data.user).not.toHaveProperty('roleId');
   });
 });

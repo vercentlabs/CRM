@@ -1,4 +1,4 @@
-# API (Phase 3)
+# API (Phase 3; pre-v1 routes removed in Phase 5)
 
 The backend is a modular monolith in strict TypeScript: `apps/api/src`. `TENANCY_AND_AUTH.md` is authoritative for tenancy, sessions and permissions; this page covers how the code is organized.
 
@@ -6,18 +6,18 @@ The backend is a modular monolith in strict TypeScript: `apps/api/src`. `TENANCY
 
 ```
 src/
-  app.ts            composition only: global middleware → /health (legacy) → /api/v1 → webhooks → legacy routes → error handler
+  app.ts            composition only: global middleware → /api/v1 → provider webhooks → JSON 404 → error handler
   server.ts         env validation → listen → graceful shutdown
   platform/         cross-cutting: env, db pool, request context, logger, audit writer, tenancy, auth (sessions, tokens,
-                    cookies, middleware), http (AppError, error handler, route registry, legacy adapter helpers, query
-                    helpers, OpenAPI builder), rate limit, CORS, health, Plivo signatures
+                    cookies, middleware), http (AppError, error handler, route registry, query helpers,
+                    OpenAPI builder), rate limit, CORS, health, Plivo signatures
   integrations/     adapters to external services: plivo (Telephony), imagekit (FileStorage), email (SMTP), gold-rate
-  modules/<domain>/ <domain>.routes.ts · .controller.ts · .service.ts · .repository.ts · .schemas.ts · .legacy.ts
-  modules/index.ts  module registry (/api/v1), legacy router, webhook router
+  modules/<domain>/ <domain>.routes.ts · .controller.ts · .service.ts · .repository.ts · .schemas.ts
+  modules/index.ts  module registry (/api/v1), webhook router
   cli/              operator commands (org bootstrap)
 ```
 
-Modules: `auth`, `organizations` (members, roles, invitations, legacy `/users`), `leads`, `customers`, `opportunities`, `tasks` (+ calendar), `followups`, `notes`, `calls` (+ Plivo webhooks), `messages`, `chat`, `files`, `locations`, `reports`, `settings`, `audit`, `market` (gold rate). A module only has the files it needs.
+Modules: `auth`, `organizations` (members, roles, invitations), `leads`, `customers`, `opportunities`, `tasks` (+ calendar), `followups`, `notes`, `calls` (+ Plivo webhooks), `messages`, `chat`, `files`, `locations`, `reports`, `settings`, `audit`, `market` (gold rate). A module only has the files it needs.
 
 ## Request flow
 
@@ -33,7 +33,7 @@ route (registry) → authenticate → requirePermission / requireScope → [befo
 | service    | business rules, ownership checks, transactions, audit events | import Express, read `req`/`res`                           |
 | repository | parameterized SQL, tenant conditions, scope filters          | decide permissions, throw HTTP concerns other than via SQL |
 
-`test/architecture.test.ts` enforces the SQL/Express boundaries, the absence of numeric-role authorization and of JavaScript sources.
+`test/architecture.test.ts` enforces the SQL/Express boundaries, the absence of numeric-role authorization, of legacy role ids in DTOs, of the removed compatibility layer and of JavaScript sources.
 
 ## Repository tenancy rule
 
@@ -78,11 +78,11 @@ Request schemas live in `@crm/validation` (`src/crm/schemas.ts`, shared helpers 
 
 `@crm/api-client` exposes `client.v1.<resource>` (leads, customers, …, auth, organizations) typed with `@crm/types` DTOs and `@crm/validation` inputs. Web uses cookie mode (`credentials: 'include'`, `getCsrfToken`), mobile uses bearer mode (`getToken`). Errors are `ApiClientError` with `code`, `status`, `details` and `requestId`.
 
-## Legacy compatibility
+## Removed pre-v1 routes (Phase 5)
 
-Unversioned routes (`/leads`, `/users`, `/api/chat`, …) are thin adapters in `<domain>.legacy.ts` over the **same services**. They keep their historical request and response shapes, answer malformed ids with 404, and send `Deprecation: true`. Errors keep `{ success:false, message, errors?, requestId }`. They are removed once web (Phase 4) and mobile (Phase 5) use `/api/v1`. `test/compatibility.test.ts` checks that both surfaces agree.
+The unversioned routes (`/leads`, `/users`, `/api/chat`, `/health`, …) and their adapters (`*.legacy.ts`, `createLegacyRouter`, `platform/http/legacy*.ts`) were deleted once web (Phase 4) and mobile (Phase 5) used only `/api/v1`. Every unknown path, old ones included, answers the standard JSON 404 envelope; `test/http.test.ts` asserts that for each old prefix so none is remounted by accident. Old clients (for example an outdated mobile build) must upgrade. The table maps each old route to its replacement:
 
-| Legacy                                             | /api/v1                                                                       |
+| Removed                                            | /api/v1                                                                       |
 | -------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `/auth/login`, `/auth/logout`                      | `/auth/login`, `/auth/logout` (+ `refresh`, `session`, `switch-organization`) |
 | `/users/forgot-password` … `/verify-reset-token`   | `/auth/password/{forgot,reset,verify}`                                        |
@@ -103,4 +103,4 @@ Unversioned routes (`/leads`, `/users`, `/api/chat`, …) are thin adapters in `
 | `/gold/gold-rate`, `/gold/gold/refresh`            | `/market/gold-rate[/refresh]`                                                 |
 | `/admin/dashboard`, `/health`                      | – (`/api/v1/health/{live,ready}`)                                             |
 
-Provider webhooks `/api/plivo/webhook/{answer,recording,status}` are stable URLs, not deprecated.
+Provider webhooks `/api/plivo/webhook/{answer,recording,status}` are the only routes outside `/api/v1`: stable, signature-verified URLs that were kept.

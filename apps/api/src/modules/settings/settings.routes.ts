@@ -1,9 +1,6 @@
 import { EMAIL_PATTERN, updateSettingsSchema } from '@crm/validation';
-import { Router } from 'express';
 import { z } from 'zod';
 import { AppError } from '../../platform/http/errors.js';
-import { legacyRoute } from '../../platform/http/legacy.js';
-import { sendSuccess } from '../../platform/http/legacy-response.js';
 import { controller, ok, type ApiModule } from '../../platform/http/route.js';
 import { actorFrom } from '../../platform/tenancy.js';
 import * as service from './settings.service.js';
@@ -84,32 +81,3 @@ export const settingsModule: ApiModule = {
     },
   ],
 };
-
-/** DEPRECATED `/settings` adapters → settings.service. */
-export function legacySettingsRouter(): Router {
-  const router = Router();
-  router.get(
-    '/',
-    ...legacyRoute({
-      permission,
-      handle: async ({ actor, res }) => {
-        sendSuccess(res, 'Settings retrieved successfully', {
-          settings: await service.getSettings(actor),
-        });
-      },
-    }),
-  );
-  router.patch(
-    '/',
-    ...legacyRoute({
-      permission,
-      body: updateSettingsSchema,
-      handle: async ({ actor, body, res }) => {
-        sendSuccess(res, 'Settings updated successfully', {
-          settings: await service.updateSettings(actor, body.settings),
-        });
-      },
-    }),
-  );
-  return router;
-}

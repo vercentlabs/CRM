@@ -1,8 +1,7 @@
-import { Router, type RequestHandler } from 'express';
+import type { RequestHandler } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import { AppError } from '../../platform/http/errors.js';
-import { legacyRoute } from '../../platform/http/legacy.js';
 import { controller, created, type ApiModule } from '../../platform/http/route.js';
 import { actorFrom } from '../../platform/tenancy.js';
 import { ALLOWED_MIME_TYPES, MAX_UPLOAD_BYTES, uploadChatAttachment } from './files.service.js';
@@ -48,22 +47,3 @@ export const filesModule: ApiModule = {
     },
   ],
 };
-
-/** DEPRECATED `/api/upload/*` adapter → files.service. */
-export function legacyUploadRouter(): Router {
-  const router = Router();
-  router.post(
-    '/chat-attachment',
-    ...legacyRoute({
-      permission: 'crm.chat.use',
-      before: [singleFile],
-      handle: async ({ actor, req, res }) => {
-        const data = await uploadChatAttachment(actor, req.file);
-        res
-          .status(200)
-          .json({ message: 'File uploaded successfully', data: { success: true, ...data } });
-      },
-    }),
-  );
-  return router;
-}

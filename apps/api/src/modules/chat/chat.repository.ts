@@ -5,13 +5,8 @@ import type { Tenant } from '../../platform/tenancy.js';
 /**
  * Internal team chat. Tenancy is derived from chat_conversations.organization_id;
  * participants/messages are always reached through a conversation of the
- * tenant. `role_id` in results is the member's legacy role id in this
- * organization (display only).
+ * tenant.
  */
-
-const roleJoin = (userAlias: string, orgExpr: string, alias: string) => `
-  LEFT JOIN organization_memberships ${alias}_m ON ${alias}_m.user_id = ${userAlias}.id AND ${alias}_m.organization_id = ${orgExpr}
-  LEFT JOIN roles ${alias}_r ON ${alias}_r.id = ${alias}_m.role_id`;
 
 export async function listForUser(
   db: Queryable,
@@ -22,15 +17,13 @@ export async function listForUser(
     `SELECT c.id, c.name, c.is_group, c.created_at, c.updated_at, me.last_read_at,
             cm.content AS last_message, cm.created_at AS last_message_time, cm.sender_id AS last_message_sender_id,
             su.full_name AS last_message_sender_name, su.username AS last_message_sender_username,
-            s_r.legacy_role_id AS last_message_sender_role_id,
             COALESCE(unread.unread_count, 0)::int AS unread_count,
             COALESCE(
               (SELECT json_agg(jsonb_build_object(
                  'user_id', cp.user_id, 'is_online', cp.is_online, 'full_name', pu.full_name,
-                 'username', pu.username, 'role_id', p_r.legacy_role_id))
+                 'username', pu.username))
                FROM chat_participants cp
                JOIN users pu ON pu.id = cp.user_id
-               ${roleJoin('pu', 'c.organization_id', 'p')}
                WHERE cp.conversation_id = c.id),
               '[]'::json
             ) AS participants
@@ -38,7 +31,6 @@ export async function listForUser(
      JOIN chat_participants me ON me.conversation_id = c.id AND me.user_id = $2
      LEFT JOIN chat_messages cm ON cm.id = (SELECT MAX(id) FROM chat_messages WHERE conversation_id = c.id)
      LEFT JOIN users su ON su.id = cm.sender_id
-     ${roleJoin('su', 'c.organization_id', 's')}
      LEFT JOIN (
        SELECT conversation_id, COUNT(*) AS unread_count FROM chat_messages
        WHERE is_read = false AND sender_id != $2 GROUP BY conversation_id
@@ -74,11 +66,10 @@ export async function listMessages(
   const result = await db.query(
     `SELECT cm.id, cm.conversation_id, cm.sender_id, cm.content, cm.message_type, cm.attachment_url, cm.file_type,
             cm.is_read, cm.created_at,
-            u.full_name AS sender_name, u.username AS sender_username, s_r.legacy_role_id AS sender_role_id
+            u.full_name AS sender_name, u.username AS sender_username
      FROM chat_messages cm
      JOIN chat_conversations c ON c.id = cm.conversation_id AND c.organization_id = $2
      JOIN users u ON u.id = cm.sender_id
-     ${roleJoin('u', '$2', 's')}
      WHERE cm.conversation_id = $1
      ORDER BY cm.created_at ASC, cm.id ASC`,
     [conversationId, tenant.organizationId],
@@ -94,11 +85,10 @@ export async function findMessage(
   const result = await db.query(
     `SELECT cm.id, cm.conversation_id, cm.sender_id, cm.content, cm.message_type, cm.attachment_url, cm.file_type,
             cm.is_read, cm.created_at,
-            u.full_name AS sender_name, u.username AS sender_username, s_r.legacy_role_id AS sender_role_id
+            u.full_name AS sender_name, u.username AS sender_username
      FROM chat_messages cm
      JOIN chat_conversations c ON c.id = cm.conversation_id AND c.organization_id = $2
      JOIN users u ON u.id = cm.sender_id
-     ${roleJoin('u', '$2', 's')}
      WHERE cm.id = $1`,
     [messageId, tenant.organizationId],
   );
@@ -209,11 +199,10 @@ export async function participants(
   conversationId: number,
 ): Promise<ChatParticipant[]> {
   const result = await db.query(
-    `SELECT cp.user_id, cp.is_online, cp.last_read_at, u.full_name, u.username, p_r.legacy_role_id AS role_id
+    `SELECT cp.user_id, cp.is_online, cp.last_read_at, u.full_name, u.username
      FROM chat_participants cp
      JOIN chat_conversations c ON c.id = cp.conversation_id AND c.organization_id = $2
      JOIN users u ON u.id = cp.user_id
-     ${roleJoin('u', '$2', 'p')}
      WHERE cp.conversation_id = $1
      ORDER BY u.full_name ASC`,
     [conversationId, tenant.organizationId],

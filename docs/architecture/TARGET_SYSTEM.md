@@ -29,22 +29,21 @@ Clients never import `database`. `types` holds wire contracts only, never DB row
 
 - All new code is strict TypeScript (`@crm/config/tsconfig/{node,library}.json`).
 - The API is fully TypeScript since Phase 3 (no `allowJs`). It is built by `tsc` to `dist/`, and `tsx` is used in dev.
-- Web is TypeScript since Phase 4. Mobile is already TS.
+- Web is TypeScript since Phase 4; mobile is TypeScript and was rebuilt on the shared packages in Phase 5.
 
 ## API
 
-- **Versioning:** everything new is under `/api/v1`. Legacy unversioned routes stay mounted until the web and mobile callers move (Phase 3). They are then removed in one reviewed change, never silently.
-- **Module layout (Phase 3, implemented):** `src/modules/<domain>/{routes,controller,service,repository,schemas,legacy}.ts`, declared in a route registry that drives mounting, validation and OpenAPI. Controllers are thin, services hold business rules and transactions, and repositories hold all SQL. Details in `API.md`.
+- **Versioning:** every client route is under `/api/v1`. The unversioned routes were removed in one reviewed change in Phase 5, after web (Phase 4) and mobile (Phase 5) moved; they answer a JSON 404. Only the Plivo webhooks live outside `/api/v1`.
+- **Module layout (Phase 3, implemented):** `src/modules/<domain>/{routes,controller,service,repository,schemas}.ts`, declared in a route registry that drives mounting, validation and OpenAPI. Controllers are thin, services hold business rules and transactions, and repositories hold all SQL. Details in `API.md`.
 - **Success envelope:** `{ "success": true, "data": T, "meta"?: { "pagination"?: {page,limit,total,totalPages} } }`
 - **Error envelope:** `{ "success": false, "error": { "code": ErrorCode, "message": string, "details"?: [{field,message}], "requestId": string } }`
   - Codes (`@crm/types` `ERROR_CODES`): BAD_REQUEST 400, VALIDATION_FAILED 400, UNAUTHENTICATED 401, FORBIDDEN 403, NOT_FOUND 404, CONFLICT 409, PAYLOAD_TOO_LARGE 413, RATE_LIMITED 429, INTERNAL_ERROR 500, SERVICE_UNAVAILABLE 503.
   - Throw `AppError` (`src/platform/http/errors.ts`). Anything else becomes a generic 500, and the real error is logged with the request ID. Stack traces are never returned.
-  - Legacy routes keep `{ success:false, message }` (plus `requestId`) for compatibility.
 - **Request ID:** `x-request-id` is accepted if it matches `[A-Za-z0-9._:-]{8,128}`, otherwise generated. It is echoed on every response and included in error bodies and logs.
-- **Request context:** `AsyncLocalStorage` (`src/platform/request-context.ts`) carries `requestId`, `user` and (since Phase 2) the verified `auth` context: userId, sessionId, organizationId, membershipId, roleKey and permissions.
+- **Request context:** `AsyncLocalStorage` (`src/platform/request-context.ts`) carries `requestId`, the client IP/user agent and (since Phase 2) the verified `auth` context: userId, sessionId, organizationId, membershipId, roleKey and permissions.
 - **Validation:** zod schemas from `@crm/validation`, shared with clients. Issues map to `details`.
 - **OpenAPI:** generated from the zod schemas and route registry and served at `/api/v1/openapi.json`. `api-client` uses the same sources directly (`@crm/types` DTOs, `@crm/validation` inputs) instead of code generation.
-- **Health:** `/api/v1/health/live` (process up) and `/api/v1/health/ready` (DB `SELECT 1` within 2s, not draining). They return status and latency only. Legacy `/health` is kept.
+- **Health:** `/api/v1/health/live` (process up) and `/api/v1/health/ready` (DB `SELECT 1` within 2s, not draining). They return status and latency only. The pre-v1 `/health` was removed in Phase 5 (the Docker `HEALTHCHECK` uses `/api/v1/health/live`).
 
 ## Tenancy (implemented in Phase 2)
 
@@ -69,7 +68,7 @@ Next.js App Router, presentation only (implemented in Phase 4, see `WEB.md`). It
 
 ## Mobile
 
-Expo, native UI and navigation only. It uses `@crm/api-client` (lazy base URL; short-lived access token in memory, rotating refresh token in SecureStore since Phase 2) and the same contracts as web. Device features (storage, documents, notifications) stay in the app.
+Expo, native UI and navigation only (implemented in Phase 5, see `MOBILE.md`). It uses `@crm/api-client` in bearer mode (short-lived access token in memory, rotating refresh token in SecureStore), shared zod schemas and permissions, and the same contracts as web. Device features (secure storage, documents, notifications) stay in the app.
 
 ## Worker, jobs and events
 
@@ -90,5 +89,5 @@ Uploads go through the API (size and type validated), are stored in ImageKit or 
 
 - Vitest everywhere. Unit tests sit next to the code (`*.test.ts`), and API HTTP tests live in `apps/api/test/*.test.ts` against a real ephemeral server.
 - DB integration tests run when `TEST_DATABASE_URL` points at a disposable Postgres. They use a throwaway schema per run.
-- Web tests use the colocated `*.test.js` convention (Vitest, node env; jsdom only if component tests are added). Mobile tests (jest-expo) are added in Phase 5.
+- Web tests: Vitest + Testing Library (`apps/web/test`) and Playwright E2E (`apps/web/e2e`). Mobile tests: jest-expo + React Native Testing Library (`apps/mobile/test`), including an architecture test.
 - `pnpm test` runs everything through turbo, and each package can run `pnpm --filter <pkg> test` on its own.

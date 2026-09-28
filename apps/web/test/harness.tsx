@@ -114,7 +114,7 @@ export function makeSession(
   overrides: Partial<AuthSessionView> = {},
 ): AuthSessionView {
   return {
-    user: { id: 10, email: 'ana@example.test', name: 'Ana Admin', roleId: null },
+    user: { id: 10, email: 'ana@example.test', name: 'Ana Admin' },
     organization: { id: '11111111-1111-4111-8111-111111111111', name: 'Alpha Corp', slug: 'alpha' },
     membership: { id: 1, role: { key: 'admin', name: 'Admin' } },
     permissions,

@@ -4,12 +4,6 @@ import type { GrantMap } from '@crm/permissions';
 import { REQUEST_ID_HEADER } from '@crm/types';
 import type { NextFunction, Request, Response } from 'express';
 
-/** Identity kept for legacy controllers (`req.user`). `roleId` is display-only. */
-export interface ContextUser {
-  userId: number;
-  roleId: number | null;
-}
-
 /**
  * Verified tenant/auth identity. Every field was loaded from the database for
  * this request (session → user → active membership → role → grants); nothing
@@ -28,7 +22,6 @@ export interface TenantAuth {
 export interface RequestContext {
   requestId: string;
   startedAt: number;
-  user?: ContextUser;
   auth?: TenantAuth;
   /** Source IP and user agent, captured once for audit logging. */
   ip?: string | undefined;
@@ -52,20 +45,10 @@ export function getRequestId(): string | undefined {
   return storage.getStore()?.requestId;
 }
 
-export function setContextUser(user: ContextUser): void {
-  const context = storage.getStore();
-  if (context) context.user = user;
-}
-
 export function setContextAuth(auth: TenantAuth): void {
   const context = storage.getStore();
   if (!context) return;
   context.auth = auth;
-  context.user = { userId: auth.userId, roleId: context.user?.roleId ?? null };
-}
-
-export function runWithRequestContext<T>(context: RequestContext, fn: () => T): T {
-  return storage.run(context, fn);
 }
 
 declare global {

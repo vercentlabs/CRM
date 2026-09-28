@@ -420,12 +420,12 @@ export const updateSettingsSchema = z.object({
 // ---------------------------------------------------------------- members / users
 export const createMemberSchema = z.object({
   full_name: z
-    .string({ error: 'All fields are required: full_name, email, password, roleId' })
+    .string({ error: 'All fields are required: full_name, email, password, roleKey' })
     .trim()
     .min(1)
     .max(100),
   email: z
-    .string({ error: 'All fields are required: full_name, email, password, roleId' })
+    .string({ error: 'All fields are required: full_name, email, password, roleKey' })
     .trim()
     .regex(EMAIL_PATTERN, 'Invalid email format')
     .max(100),
@@ -444,17 +444,17 @@ export const updateMemberSchema = z
 
 export const updateProfileSchema = z.object({
   full_name: z
-    .string({ error: 'All fields are required: full_name, email, username, role_id' })
+    .string({ error: 'All fields are required: full_name, email, username' })
     .trim()
     .min(1)
     .max(100),
   email: z
-    .string({ error: 'All fields are required: full_name, email, username, role_id' })
+    .string({ error: 'All fields are required: full_name, email, username' })
     .trim()
     .regex(EMAIL_PATTERN, 'Invalid email format')
     .max(100),
   username: z
-    .string({ error: 'All fields are required: full_name, email, username, role_id' })
+    .string({ error: 'All fields are required: full_name, email, username' })
     .trim()
     .min(1)
     .max(50),

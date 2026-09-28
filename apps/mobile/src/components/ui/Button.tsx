@@ -1,131 +1,126 @@
-import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useTheme } from '../../theme/ThemeProvider';
+import { Feather } from '@expo/vector-icons';
+import type { ComponentProps, ReactNode } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
+import { useColors } from '../../theme/ThemeProvider';
+import { Text } from './Text';
 
-type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
-type ButtonSize = 'sm' | 'md' | 'lg';
+export type IconName = ComponentProps<typeof Feather>['name'];
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
-type ButtonProps = {
-  label?: string;
-  children?: React.ReactNode;
-  onPress?: () => void;
-  variant?: ButtonVariant;
-  size?: ButtonSize;
-  loading?: boolean;
-  disabled?: boolean;
-  icon?: React.ReactNode;
-  style?: object;
-  textStyle?: object;
-};
-
-const Button = ({
+/**
+ * Button with a 44pt minimum touch target, pending state (disabled + spinner,
+ * which also prevents duplicate submits) and an accessibility role/state.
+ */
+export function Button({
   label,
-  children,
   onPress,
-  variant = 'primary',
-  size = 'md',
+  variant = 'secondary',
+  icon,
   loading = false,
   disabled = false,
-  icon,
   style,
-  textStyle
-}: ButtonProps) => {
-  const { theme, resolvedMode } = useTheme();
-  const { colors } = theme;
-  const primaryBackground =
-    resolvedMode === 'light'
-      ? colors.primary || colors.brand || '#000000'
-      : colors.brand || colors.primary || '#6366f1';
-  const primaryForeground = colors.primaryForeground || '#ffffff';
-  const stylesByVariant = {
-    primary: {
-      backgroundColor: primaryBackground,
-      borderWidth: 1,
-      borderColor: primaryBackground
-    },
-    secondary: {
-      backgroundColor: colors.appShell,
-      borderWidth: 1,
-      borderColor: colors.border
-    },
-    ghost: {
-      backgroundColor: 'transparent'
-    },
-    danger: {
-      backgroundColor: colors.destructive
-    }
-  } as const;
-
-  const textByVariant = {
-    primary: { color: primaryForeground },
-    secondary: { color: colors.foreground },
-    ghost: { color: colors.foreground },
-    danger: { color: colors.primaryForeground }
-  } as const;
-
-  const content = label ?? null;
-  const isDisabled = disabled || loading;
-
+  accessibilityHint,
+  testID,
+}: {
+  label: string;
+  onPress?: () => void;
+  variant?: Variant;
+  icon?: IconName;
+  loading?: boolean;
+  disabled?: boolean;
+  style?: StyleProp<ViewStyle>;
+  accessibilityHint?: string;
+  testID?: string;
+}) {
+  const c = useColors();
+  const palette: Record<Variant, { bg: string; fg: string; border: string }> = {
+    primary: { bg: c.primary, fg: c.primaryFg, border: c.primary },
+    secondary: { bg: c.surface, fg: c.fg, border: c.borderStrong },
+    ghost: { bg: 'transparent', fg: c.primary, border: 'transparent' },
+    danger: { bg: c.danger, fg: '#ffffff', border: c.danger },
+  };
+  const p = palette[variant];
+  const inactive = disabled || loading;
   return (
     <Pressable
-      onPress={onPress}
-      disabled={isDisabled}
+      testID={testID}
+      onPress={inactive ? undefined : onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled: inactive, busy: loading }}
       style={({ pressed }) => [
-        styles.base,
-        stylesBySize[size],
-        stylesByVariant[variant],
-        pressed && !isDisabled ? styles.pressed : null,
-        isDisabled ? styles.disabled : null,
-        style
+        styles.button,
+        {
+          backgroundColor: p.bg,
+          borderColor: p.border,
+          opacity: inactive ? 0.55 : pressed ? 0.85 : 1,
+        },
+        style,
       ]}
     >
       <View style={styles.content}>
         {loading ? (
-          <ActivityIndicator
-            color={variant === 'secondary' ? colors.foreground : colors.primaryForeground}
-          />
-        ) : (
-          icon
-        )}
-        {content ? (
-          <Text style={[styles.textBase, textByVariant[variant], textStyle]}>{content}</Text>
-        ) : (
-          children
-        )}
+          <ActivityIndicator size="small" color={p.fg} />
+        ) : icon ? (
+          <Feather name={icon} size={18} color={p.fg} />
+        ) : null}
+        <Text variant="label" style={{ color: p.fg, fontWeight: '600' }} numberOfLines={1}>
+          {label}
+        </Text>
       </View>
     </Pressable>
   );
-};
+}
 
-export default Button;
+/** Icon-only button: the label is required because there is no visible text. */
+export function IconButton({
+  icon,
+  label,
+  onPress,
+  color,
+  disabled,
+  badge,
+}: {
+  icon: IconName;
+  label: string;
+  onPress?: () => void;
+  color?: string;
+  disabled?: boolean;
+  badge?: ReactNode;
+}) {
+  const c = useColors();
+  return (
+    <Pressable
+      onPress={disabled ? undefined : onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: Boolean(disabled) }}
+      hitSlop={6}
+      style={({ pressed }) => [styles.iconButton, { opacity: disabled ? 0.4 : pressed ? 0.6 : 1 }]}
+    >
+      <Feather name={icon} size={22} color={color ?? c.fg} />
+      {badge}
+    </Pressable>
+  );
+}
 
 const styles = StyleSheet.create({
-  base: {
-    borderRadius: 12,
+  button: {
+    minHeight: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
-    flexDirection: 'row'
   },
-  content: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8
-  },
-  textBase: {
-    fontSize: 12,
-    fontWeight: '600'
-  },
-  pressed: {
-    opacity: 0.85
-  },
-  disabled: {
-    opacity: 0.6
-  }
+  content: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  iconButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
 });
-
-const stylesBySize: Record<ButtonSize, object> = {
-  sm: { height: 32, paddingHorizontal: 12 },
-  md: { height: 40, paddingHorizontal: 16 },
-  lg: { height: 48, paddingHorizontal: 18 }
-};

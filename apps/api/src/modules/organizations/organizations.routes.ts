@@ -19,7 +19,6 @@ export const memberSchema = z.object({
   full_name: z.string(),
   email: z.string(),
   username: z.string(),
-  role_id: z.number().nullable(),
   role_key: z.string(),
   role_name: z.string(),
   membership_id: z.number(),
@@ -71,7 +70,7 @@ const addMember = controller({
   body: createMemberSchema,
   handle: async ({ auth, body }) => {
     const actor = actorFrom(auth);
-    const role = await service.resolveRole(actor, { roleKey: body.roleKey });
+    const role = await service.resolveRole(actor, body.roleKey);
     const { member } = await service.addMember(actor, { ...body, role });
     return created(member);
   },

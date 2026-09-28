@@ -1,4 +1,4 @@
-import { API_V1_PREFIX, type ApiErrorResponse } from '@crm/types';
+import type { ApiErrorResponse } from '@crm/types';
 import type { NextFunction, Request, Response } from 'express';
 import { getRequestId } from '../request-context.js';
 import { AppError, codeForStatus, isAppError } from './errors.js';
@@ -74,7 +74,10 @@ function logError(req: Request, appError: AppError, original: unknown): void {
   else console.warn(JSON.stringify(entry));
 }
 
-/** 404 for unknown routes under /api/v1 (legacy routes keep Express's default 404). */
+/**
+ * JSON 404 for unknown routes. Mounted inside /api/v1 and after every other
+ * router, so removed pre-v1 endpoints answer with the standard envelope.
+ */
 export function notFoundHandler(req: Request, _res: Response, next: NextFunction): void {
   next(AppError.notFound(`Route ${req.method} ${req.baseUrl}${req.path} not found`));
 }
@@ -82,8 +85,7 @@ export function notFoundHandler(req: Request, _res: Response, next: NextFunction
 /**
  * Terminal error middleware. Stack traces and internal messages are never sent
  * to clients in any environment; they are logged with the request id instead.
- * `/api/v1` uses the standard error envelope; legacy routes keep their
- * historical `{ success:false, message }` shape.
+ * Every response uses the standard error envelope.
  */
 export function errorHandler(
   error: unknown,
@@ -100,24 +102,14 @@ export function errorHandler(
   const requestId = getRequestId() ?? req.requestId;
   if (appError.status >= 500 || !isAppError(error)) logError(req, appError, error);
 
-  if (req.originalUrl.startsWith(API_V1_PREFIX)) {
-    const body: ApiErrorResponse = {
-      success: false,
-      error: {
-        code: appError.code,
-        message: appError.message,
-        ...(appError.details ? { details: appError.details } : {}),
-        ...(requestId ? { requestId } : {}),
-      },
-    };
-    res.status(appError.status).json(body);
-    return;
-  }
-
-  res.status(appError.status).json({
+  const body: ApiErrorResponse = {
     success: false,
-    message: appError.message,
-    ...(appError.details ? { errors: appError.details } : {}),
-    ...(requestId ? { requestId } : {}),
-  });
+    error: {
+      code: appError.code,
+      message: appError.message,
+      ...(appError.details ? { details: appError.details } : {}),
+      ...(requestId ? { requestId } : {}),
+    },
+  };
+  res.status(appError.status).json(body);
 }

@@ -1,23 +1,19 @@
+/** Mobile type scale (system font; sizes scale with the OS text-size setting). */
 export const typography = {
-  fontFamily: {
-    regular: 'System',
-    medium: 'System',
-    semibold: 'System'
-  },
   fontSize: {
-    xs: 10,
-    sm: 12,
-    md: 14,
-    lg: 16,
-    xl: 18,
-    xxl: 22
+    xs: 12,
+    sm: 13,
+    md: 15,
+    lg: 17,
+    xl: 20,
+    xxl: 24,
   },
-  lineHeight: {
-    sm: 16,
-    md: 20,
-    lg: 24
-  }
-};
+  weight: {
+    regular: '400',
+    medium: '500',
+    semibold: '600',
+    bold: '700',
+  },
+} as const;
 
 export type TypographyScale = typeof typography;
-

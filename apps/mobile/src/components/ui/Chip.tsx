@@ -1,59 +1,48 @@
-import React from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
-import { useTheme } from '../../theme/ThemeProvider';
+import { Pressable, StyleSheet } from 'react-native';
+import { useColors } from '../../theme/ThemeProvider';
+import { Text } from './Text';
 
-type ChipProps = {
+/** Filter chip (toggle). Selection is conveyed by state and weight, not colour alone. */
+export function Chip({
+  label,
+  selected,
+  onPress,
+}: {
   label: string;
-  active?: boolean;
-  onPress?: () => void;
-  style?: object;
-  textStyle?: object;
-};
-
-const Chip = ({ label, active = false, onPress, style, textStyle }: ChipProps) => {
-  const { theme } = useTheme();
-  const { colors } = theme;
-
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const c = useColors();
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.base,
-        active
-          ? { backgroundColor: colors.brandMuted, borderColor: colors.brand }
-          : { borderColor: colors.border },
-        pressed ? styles.pressed : null,
-        style
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      accessibilityLabel={`Filter: ${label}`}
+      style={[
+        styles.chip,
+        {
+          borderColor: selected ? c.primary : c.borderStrong,
+          backgroundColor: selected ? c.primarySoft : c.surface,
+        },
       ]}
     >
       <Text
-        style={[
-          styles.text,
-          active ? { color: colors.brandSoft } : { color: colors.mutedForeground },
-          textStyle
-        ]}
+        variant="label"
+        style={{ color: selected ? c.primary : c.fg, fontWeight: selected ? '700' : '500' }}
       >
         {label}
       </Text>
     </Pressable>
   );
-};
-
-export default Chip;
+}
 
 const styles = StyleSheet.create({
-  base: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
+  chip: {
+    minHeight: 36,
+    paddingHorizontal: 14,
+    borderRadius: 18,
     borderWidth: 1,
-    marginRight: 8
+    justifyContent: 'center',
   },
-  pressed: {
-    opacity: 0.85
-  },
-  text: {
-    fontSize: 11,
-    fontWeight: '600'
-  }
 });

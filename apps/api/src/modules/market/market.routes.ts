@@ -1,6 +1,4 @@
-import { Router } from 'express';
 import { z } from 'zod';
-import { authenticate, requirePermission } from '../../platform/auth/middleware.js';
 import {
   getGoldRate,
   GoldRateUnavailableError,
@@ -59,28 +57,3 @@ export const marketModule: ApiModule = {
     },
   ],
 };
-
-/** DEPRECATED `/gold-rate` and `/gold/refresh` (mounted at `/gold`). */
-export function legacyGoldRouter(): Router {
-  const router = Router();
-  const respond = async (forceRefresh: boolean, res: import('express').Response) => {
-    try {
-      const data = await getGoldRate({ forceRefresh });
-      res.setHeader('Deprecation', 'true');
-      if (forceRefresh)
-        res.status(200).json({ message: 'Gold rates refreshed successfully', data });
-      else res.status(200).json(data);
-    } catch (error) {
-      if (!(error instanceof GoldRateUnavailableError)) throw error;
-      res.status(503).json({ message: error.message, source: 'none', warning: true });
-    }
-  };
-  router.get('/gold-rate', authenticate, (_req, res) => respond(false, res));
-  router.post(
-    '/gold/refresh',
-    authenticate,
-    requirePermission('settings.organization.manage'),
-    (_req, res) => respond(true, res),
-  );
-  return router;
-}

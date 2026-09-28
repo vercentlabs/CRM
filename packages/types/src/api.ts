@@ -58,15 +58,3 @@ export interface ApiErrorResponse {
 }
 
 export type ApiResponse<T> = ApiSuccess<T> | ApiErrorResponse;
-
-/**
- * Envelope produced by the legacy (unversioned) routes via `utils/response.js`.
- * Kept so shared clients can read both shapes during the migration.
- */
-export interface LegacyApiEnvelope<T = unknown> {
-  success: boolean;
-  message?: string;
-  data?: T;
-  error?: unknown;
-  errors?: ApiFieldError[];
-}

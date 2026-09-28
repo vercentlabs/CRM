@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { redactAuditValues } from './audit.js';
 import { errorHandler } from './http/error-handler.js';
 import { createRateLimiter } from './rate-limit.js';
-import { parseId } from './tenancy.js';
 
 describe('audit redaction', () => {
   it('removes credentials and tokens at any depth', () => {
@@ -20,16 +19,6 @@ describe('audit redaction', () => {
       nested: { refreshToken: '[REDACTED]', apiKey: '[REDACTED]', keep: 1 },
       list: [{ password: '[REDACTED]' }],
     });
-  });
-});
-
-describe('parseId', () => {
-  it('accepts positive integer ids only', () => {
-    expect(parseId('12')).toBe(12);
-    expect(parseId(7)).toBe(7);
-    for (const value of ['0', '-1', '1.5', '1 OR 1=1', '', null, undefined, '99999999999']) {
-      expect(parseId(value)).toBeNull();
-    }
   });
 });
 

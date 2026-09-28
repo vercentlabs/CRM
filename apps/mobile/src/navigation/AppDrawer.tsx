@@ -1,122 +1,220 @@
-import React from 'react';
-import { createDrawerNavigator } from '@react-navigation/drawer';
-import AppTabs from './AppTabs';
-import DrawerContent from './DrawerContent';
-import CustomersStack from './CustomersStack';
-import OpportunitiesStack from './OpportunitiesStack';
-import TasksStack from './TasksStack';
-import FollowupsScreen from '../screens/FollowupsScreen';
-import OverdueFollowupsScreen from '../screens/OverdueFollowupsScreen';
-import CalendarStack from './CalendarStack';
-import ReportsStack from './ReportsStack';
-import SettingsScreen from '../screens/SettingsScreen';
-import UsersStack from './UsersStack';
-import AdminScreen from '../screens/AdminScreen';
-import CallsScreen from '../screens/CallsScreen';
-import AuditLogsScreen from '../screens/AuditLogsScreen';
-import LocationsScreen from '../screens/LocationsScreen';
-import LeadMessagesScreen from '../screens/LeadMessagesScreen';
-import BulkMessagesScreen from '../screens/BulkMessagesScreen';
-import ProfileScreen from '../screens/ProfileScreen';
-import ChangePasswordScreen from '../screens/ChangePasswordScreen';
-import AIAgentScreen from '../screens/AIAgentScreen';
-import { useTheme } from '../theme/ThemeProvider';
-import { useAuth } from '../context/AuthContext';
-import { ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES } from '../config/constants';
-
-export type DrawerParamList = {
-  Tabs: undefined;
-  AIAgent: undefined;
-  Customers: undefined;
-  Opportunities: undefined;
-  Tasks: undefined;
-  Followups: undefined;
-  OverdueFollowups: undefined;
-  Calendar: undefined;
-  Calls: undefined;
-  LeadMessages: undefined;
-  BulkMessages: undefined;
-  Reports: undefined;
-  AuditLogs: undefined;
-  Locations: undefined;
-  Settings: undefined;
-  Users: undefined;
-  Admin: undefined;
-  Profile: undefined;
-  ChangePassword: undefined;
-};
+import { Feather } from '@expo/vector-icons';
+import {
+  createDrawerNavigator,
+  DrawerContentScrollView,
+  type DrawerContentComponentProps,
+} from '@react-navigation/drawer';
+import { CommonActions } from '@react-navigation/native';
+import type { ComponentType } from 'react';
+import { useMemo, useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Avatar, Badge, Text, useToast } from '../components/ui';
+import { errorMessage } from '../lib/errors';
+import { AccountScreen } from '../modules/account/AccountScreen';
+import { CalendarScreen } from '../modules/tasks/CalendarScreen';
+import { CallsScreen } from '../modules/calls/CallsScreen';
+import { useChatUnread } from '../modules/chat/hooks';
+import { ChatScreen } from '../modules/chat/ChatScreen';
+import { CustomersScreen } from '../modules/customers/CustomersScreen';
+import { HomeScreen } from '../modules/dashboard/HomeScreen';
+import { FollowupsScreen } from '../modules/followups/FollowupsScreen';
+import { LeadsScreen } from '../modules/leads/LeadsScreen';
+import { LocationsScreen } from '../modules/locations/LocationsScreen';
+import { MessagesScreen } from '../modules/messages/MessagesScreen';
+import { NotesScreen } from '../modules/notes/NotesScreen';
+import { OpportunitiesScreen } from '../modules/opportunities/OpportunitiesScreen';
+import { MembersScreen } from '../modules/organization/MembersScreen';
+import { ReportsScreen } from '../modules/reports/ReportsScreen';
+import { SettingsScreen } from '../modules/settings/SettingsScreen';
+import { TasksScreen } from '../modules/tasks/TasksScreen';
+import { useSession } from '../providers/SessionProvider';
+import { useColors } from '../theme/ThemeProvider';
+import { visibleMenu } from './menu';
+import type { DrawerParamList } from './types';
 
 const Drawer = createDrawerNavigator<DrawerParamList>();
 
-const AppDrawer = () => {
-  const { theme } = useTheme();
-  const { colors } = theme;
-  const { user } = useAuth();
-  const initialRoute = user?.roleId === ROLE_ADMIN ? 'Admin' : 'Tabs';
-  const roleId = user?.roleId ?? null;
-  const hasRole = (roles?: number[]) =>
-    !roles || roles.length === 0 || (roleId ? roles.includes(roleId) : false);
+const SCREENS: Record<keyof DrawerParamList, ComponentType> = {
+  Home: HomeScreen,
+  Leads: LeadsScreen,
+  Followups: FollowupsScreen,
+  Tasks: TasksScreen,
+  Calendar: CalendarScreen,
+  Customers: CustomersScreen,
+  Opportunities: OpportunitiesScreen,
+  Notes: NotesScreen,
+  Calls: CallsScreen,
+  Messages: MessagesScreen,
+  Chat: ChatScreen,
+  Reports: ReportsScreen,
+  Locations: LocationsScreen,
+  Members: MembersScreen,
+  Settings: SettingsScreen,
+  Account: AccountScreen,
+};
 
-  type DrawerScreenDef = {
-    name: keyof DrawerParamList;
-    component: React.ComponentType<object>;
-    roles?: readonly number[];
-  };
-
-  const screens: DrawerScreenDef[] = [
-    { name: 'Tabs', component: AppTabs, roles: [ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES] },
-    { name: 'AIAgent', component: AIAgentScreen, roles: [ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES] },
-    { name: 'Customers', component: CustomersStack, roles: [ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES] },
-    { name: 'Opportunities', component: OpportunitiesStack, roles: [ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES] },
-    { name: 'Tasks', component: TasksStack, roles: [ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES] },
-    { name: 'Followups', component: FollowupsScreen, roles: [ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES] },
-    { name: 'OverdueFollowups', component: OverdueFollowupsScreen, roles: [ROLE_ADMIN, ROLE_MANAGER] },
-    { name: 'Calendar', component: CalendarStack, roles: [ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES] },
-    { name: 'Calls', component: CallsScreen, roles: [ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES] },
-    { name: 'LeadMessages', component: LeadMessagesScreen, roles: [ROLE_ADMIN, ROLE_MANAGER, ROLE_SALES] },
-    { name: 'BulkMessages', component: BulkMessagesScreen, roles: [ROLE_ADMIN, ROLE_MANAGER] },
-    { name: 'Reports', component: ReportsStack, roles: [ROLE_ADMIN, ROLE_MANAGER] },
-    { name: 'AuditLogs', component: AuditLogsScreen, roles: [ROLE_ADMIN] },
-    { name: 'Locations', component: LocationsScreen, roles: [ROLE_ADMIN, ROLE_MANAGER] },
-    { name: 'Settings', component: SettingsScreen, roles: [ROLE_ADMIN] },
-    { name: 'Users', component: UsersStack, roles: [ROLE_ADMIN] },
-    { name: 'Admin', component: AdminScreen, roles: [ROLE_ADMIN] },
-    { name: 'Profile', component: ProfileScreen },
-    { name: 'ChangePassword', component: ChangePasswordScreen }
-  ];
-
+/**
+ * Top-level navigation. Only destinations the session's permissions allow are
+ * registered, so they cannot be reached from the menu or by route name.
+ * Visibility is UX: the API authorizes every request.
+ */
+export function AppDrawer() {
+  const { canAny } = useSession();
+  const c = useColors();
+  const groups = useMemo(() => visibleMenu(canAny), [canAny]);
+  const routes = groups.flatMap((g) => g.items.map((i) => i.route));
   return (
     <Drawer.Navigator
-      initialRouteName={initialRoute}
+      initialRouteName="Home"
       screenOptions={{
         headerShown: false,
-        drawerStyle: {
-          backgroundColor: colors.appSidebar,
-          width: 280
-        },
-        // React Navigation 7 renamed sceneContainerStyle → sceneStyle (the old key was ignored)
-        sceneStyle: {
-          backgroundColor: colors.appShell
-        }
+        drawerStyle: { backgroundColor: c.surface, width: 300 },
+        sceneStyle: { backgroundColor: c.bg },
       }}
       drawerContent={(props) => <DrawerContent {...props} />}
     >
-      {screens
-        .filter((screen) => hasRole(screen.roles ? [...screen.roles] : undefined))
-        .map((screen) => (
-          <Drawer.Screen
-            key={screen.name}
-            name={screen.name}
-            component={screen.component}
-            options={
-              screen.name === 'Profile' || screen.name === 'ChangePassword'
-                ? { drawerItemStyle: { display: 'none' }, title: '' }
-                : undefined
-            }
-          />
-        ))}
+      {routes.map((route) => (
+        <Drawer.Screen key={route} name={route} component={SCREENS[route]} />
+      ))}
     </Drawer.Navigator>
   );
-};
+}
 
-export default AppDrawer;
+function DrawerContent(props: DrawerContentComponentProps) {
+  const { canAny, organization, organizations, user, membership, switchOrganization, logout } =
+    useSession();
+  const c = useColors();
+  const toast = useToast();
+  const unread = useChatUnread();
+  const [switching, setSwitching] = useState<string | null>(null);
+  const groups = useMemo(() => visibleMenu(canAny), [canAny]);
+  const current = props.state.routeNames[props.state.index];
+  const others = organizations.filter(
+    (o) => o.status === 'active' && o.organization.id !== organization?.id,
+  );
+
+  const onSwitch = async (id: string, name: string) => {
+    setSwitching(id);
+    try {
+      await switchOrganization(id);
+      // A fresh stack for the new organization: nothing from the old one stays on screen.
+      props.navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'Home' }] }));
+      toast.success(`Switched to ${name}`);
+    } catch (error) {
+      toast.error('Could not switch organization', errorMessage(error));
+    } finally {
+      setSwitching(null);
+    }
+  };
+
+  return (
+    <DrawerContentScrollView {...props} contentContainerStyle={{ paddingBottom: 24 }}>
+      <View style={[styles.header, { borderBottomColor: c.border }]}>
+        <Avatar name={user?.name} size={40} />
+        <View style={{ flex: 1 }}>
+          <Text variant="label" numberOfLines={1}>
+            {user?.name}
+          </Text>
+          <Text variant="caption" color="muted" numberOfLines={1}>
+            {membership?.role.name} · {organization?.name}
+          </Text>
+        </View>
+      </View>
+
+      {others.length > 0 ? (
+        <View style={styles.group}>
+          <Text variant="caption" color="muted" style={styles.groupLabel}>
+            SWITCH ORGANIZATION
+          </Text>
+          {others.map((o) => (
+            <Pressable
+              key={o.organization.id}
+              onPress={() => void onSwitch(o.organization.id, o.organization.name)}
+              disabled={switching !== null}
+              accessibilityRole="button"
+              accessibilityLabel={`Switch to ${o.organization.name}`}
+              accessibilityState={{ busy: switching === o.organization.id }}
+              style={styles.item}
+            >
+              <Feather name="repeat" size={18} color={c.muted} />
+              <Text style={{ flex: 1 }}>{o.organization.name}</Text>
+              {switching === o.organization.id ? (
+                <Text variant="caption" color="muted">
+                  Switching…
+                </Text>
+              ) : null}
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      {groups.map((group) => (
+        <View key={group.label} style={styles.group}>
+          <Text
+            variant="caption"
+            color="muted"
+            style={styles.groupLabel}
+            accessibilityRole="header"
+          >
+            {group.label.toUpperCase()}
+          </Text>
+          {group.items.map((item) => {
+            const active = current === item.route;
+            return (
+              <Pressable
+                key={item.route}
+                onPress={() => props.navigation.navigate(item.route)}
+                accessibilityRole="link"
+                accessibilityState={{ selected: active }}
+                style={[styles.item, active && { backgroundColor: c.primarySoft }]}
+              >
+                <Feather name={item.icon} size={18} color={active ? c.primary : c.muted} />
+                <Text
+                  style={{
+                    flex: 1,
+                    color: active ? c.primary : c.fg,
+                    fontWeight: active ? '600' : '400',
+                  }}
+                >
+                  {item.label}
+                </Text>
+                {item.route === 'Chat' && unread > 0 ? (
+                  <Badge label={`${unread > 99 ? '99+' : unread} unread`} tone="danger" />
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
+
+      <Pressable
+        onPress={() => void logout()}
+        accessibilityRole="button"
+        style={[styles.item, { marginTop: 8 }]}
+      >
+        <Feather name="log-out" size={18} color={c.danger} />
+        <Text color="danger">Sign out</Text>
+      </Pressable>
+    </DrawerContentScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  group: { paddingTop: 12, paddingHorizontal: 8 },
+  groupLabel: { paddingHorizontal: 8, paddingBottom: 4, fontWeight: '600', letterSpacing: 0.5 },
+  item: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+});

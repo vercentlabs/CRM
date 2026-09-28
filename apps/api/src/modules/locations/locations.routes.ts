@@ -1,7 +1,4 @@
-import { checkInSchema, createLocationSchema, updateLocationSchema } from '@crm/validation';
-import { Router } from 'express';
 import { z } from 'zod';
-import { legacyId, legacyRoute } from '../../platform/http/legacy.js';
 import type { ApiModule } from '../../platform/http/route.js';
 import * as locations from './locations.controller.js';
 import {
@@ -9,7 +6,6 @@ import {
   executiveLocationSchema,
   locationSchema,
 } from './locations.controller.js';
-import * as service from './locations.service.js';
 
 const tags = ['Locations'];
 
@@ -82,91 +78,3 @@ export const locationsModule: ApiModule = {
     },
   ],
 };
-
-/** DEPRECATED `/sales-locations/*` adapters → locations.service. */
-export function legacyLocationsRouter(): Router {
-  const router = Router();
-
-  router.get(
-    '/',
-    ...legacyRoute({
-      permission: 'crm.locations.read',
-      handle: async ({ actor, res }) => {
-        // Historical rows exposed the manager's name as `full_name`.
-        const rows = (await service.listLocations(actor)).map(({ manager_name, ...rest }) => ({
-          ...rest,
-          full_name: manager_name,
-        }));
-        res.status(200).json({ success: true, count: rows.length, locations: rows });
-      },
-    }),
-  );
-
-  router.post(
-    '/',
-    ...legacyRoute({
-      permission: 'crm.locations.manage',
-      body: createLocationSchema,
-      handle: async ({ actor, body, res }) => {
-        const location = await service.createLocation(actor, body);
-        res
-          .status(201)
-          .json({ success: true, message: 'Sales location created successfully', location });
-      },
-    }),
-  );
-
-  router.put(
-    '/:id',
-    ...legacyRoute({
-      permission: 'crm.locations.manage',
-      body: updateLocationSchema,
-      handle: async ({ actor, body, req, res }) => {
-        const location = await service.updateLocation(
-          actor,
-          legacyId(req.params.id, 'Sales location not found'),
-          body,
-        );
-        res
-          .status(200)
-          .json({ success: true, message: 'Sales location updated successfully', location });
-      },
-    }),
-  );
-
-  router.delete(
-    '/:id',
-    ...legacyRoute({
-      permission: 'crm.locations.manage',
-      handle: async ({ actor, req, res }) => {
-        await service.deleteLocation(actor, legacyId(req.params.id, 'Sales location not found'));
-        res.status(200).json({ success: true, message: 'Sales location deleted successfully' });
-      },
-    }),
-  );
-
-  router.post(
-    '/update-location',
-    ...legacyRoute({
-      permission: 'crm.locations.checkin',
-      body: checkInSchema,
-      handle: async ({ actor, body, res }) => {
-        const location = await service.checkIn(actor, body);
-        res.status(200).json({ success: true, message: 'Location updated successfully', location });
-      },
-    }),
-  );
-
-  router.get(
-    '/executives',
-    ...legacyRoute({
-      permission: 'crm.locations.read',
-      handle: async ({ actor, res }) => {
-        const executives = await service.listExecutiveLocations(actor);
-        res.status(200).json({ success: true, count: executives.length, executives });
-      },
-    }),
-  );
-
-  return router;
-}

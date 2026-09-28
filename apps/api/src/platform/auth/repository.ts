@@ -43,7 +43,6 @@ export interface AuthSubject {
   roleId: number;
   roleKey: string;
   roleName: string;
-  legacyRoleId: number | null;
   permissions: GrantMap;
 }
 
@@ -148,7 +147,7 @@ export async function loadAuthSubject(
             u.id AS user_id, u.email, COALESCE(u.full_name, u.username) AS name,
             o.id AS organization_id, o.public_id, o.name AS organization_name, o.slug,
             m.id AS membership_id,
-            r.id AS role_id, r.key AS role_key, r.name AS role_name, r.legacy_role_id,
+            r.id AS role_id, r.key AS role_key, r.name AS role_name,
             COALESCE(
               json_agg(json_build_object('permission', rp.permission_key, 'scope', rp.scope))
                 FILTER (WHERE rp.permission_key IS NOT NULL),
@@ -182,7 +181,6 @@ export async function loadAuthSubject(
     roleId: row.role_id,
     roleKey: row.role_key,
     roleName: row.role_name,
-    legacyRoleId: row.legacy_role_id,
     permissions: toGrantMap(row.grants),
   };
 }

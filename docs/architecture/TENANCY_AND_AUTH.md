@@ -24,11 +24,11 @@ These are the implementation-critical facts. Read this before touching any query
   - calls and messages: `user_id = me`
   - reports: filtered by the same owner columns
 - **Escalation guard:** members can only grant roles, or manage members, whose grants they already cover (`coversGrants`). Members cannot change their own membership.
-- **`users.role_id` is DEPRECATED.** It is nullable, no longer written, and never read for authorization. Responses still include `roleId` (from `roles.legacy_role_id`, 1/2/3, or null for custom roles) because the web and mobile menus still use it. Drop both in Phase 3/4.
+- **No numeric roles.** `users.role_id` and `roles.legacy_role_id` were dropped by `0004_remove_legacy_role_id.sql` (Phase 5), and no response carries `roleId`/`role_id`. A user's role exists only per organization (`organization_memberships.role_id` → `roles`, identified to clients by `role.key`). The built-in role rows keep ids 1/2/3.
 
 ## Authentication and sessions
 
-- **Login:** `POST /api/v1/auth/login {email, password, organizationId?, client: 'web'|'mobile'}`. Legacy `POST /auth/login` still works (mobile-style tokens).
+- **Login:** `POST /api/v1/auth/login {email, password, organizationId?, client: 'web'|'mobile'}`. The pre-v1 `POST /auth/login` was removed in Phase 5.
   - Every failure returns the same generic 401 `Invalid email or password`: wrong password, unknown email (timing-equalized with bcrypt), disabled user, or no active membership.
   - An explicit `organizationId` without an active membership there returns 403.
 - **Sessions:** each login creates an `auth_sessions` row (user, active organization, client, user agent, `expires_at` = now + `SESSION_TTL_DAYS` (30), `revoked_at`).
@@ -37,7 +37,7 @@ These are the implementation-critical facts. Read this before touching any query
   - Rotation happens on every refresh (`FOR UPDATE`), and the old row gets `rotated_at`.
   - Presenting a rotated token again outside `REFRESH_REUSE_GRACE_SECONDS` (10s, which covers concurrent browser tabs) revokes the whole session (reuse detection).
   - Refresh re-checks the membership and user and revokes the session if access has gone.
-- **Logout** (`/api/v1/auth/logout`, legacy `/auth/logout`) sets `revoked_at`. It accepts the access token, or the refresh token if the access token has already expired.
+- **Logout** (`/api/v1/auth/logout`) sets `revoked_at`. It accepts the access token, or the refresh token if the access token has already expired.
 - **Revocation triggers:** logout, refresh-token reuse, password reset (all of the user's sessions), membership suspension (that org's sessions), and access loss detected at refresh.
 - **Active organization:** stored on the session and bound into the token `org` claim. `POST /api/v1/auth/switch-organization {organizationId}` verifies an active membership, updates the session and issues a new access token; old tokens for the previous org then fail. Request bodies are never trusted for tenancy.
 
@@ -49,21 +49,21 @@ These are the implementation-critical facts. Read this before touching any query
 - Both are `Secure` in production (`AUTH_COOKIE_SECURE`), use `SameSite=AUTH_COOKIE_SAMESITE` (default `lax`), and take an optional `AUTH_COOKIE_DOMAIN`. Neither token is ever in a response body or JS storage.
 - **CSRF:** the response body carries `csrfToken` = HMAC(session id). Cookie-authenticated unsafe requests must send it as `x-csrf-token` or get 403. `/refresh` and `/login` are exempt. Bearer requests are not CSRF-checked.
 - **CORS:** origins in `CORS_ORIGINS` (else `FRONTEND_URL`) get `credentials: true`; any other origin keeps the old `*` without credentials, so only bearer tokens work there.
-- **Client:** `apps/web/src/lib/api.js` is the single axios client (`withCredentials`, CSRF header, one shared refresh then retry on 401). `lib/axios.js` re-exports it, and `AuthContext` restores the session from `GET /api/v1/auth/session`. `useAuth().token` is only a non-secret "authenticated" marker. Any leftover localStorage `token` is purged.
+- **Client:** `apps/web/src/lib/api.ts` creates the single `@crm/api-client` instance in cookie mode (CSRF header, one shared refresh then retry on 401). `SessionProvider` restores the session from `GET /api/v1/auth/session`. See `WEB.md`.
 
 ## Mobile (bearer)
 
 - Mobile uses `client:'mobile'`, and tokens come back in the body.
-- The refresh token is kept in **Expo SecureStore** (Keychain/Keystore), keyed per API base URL. The access token lives in memory only. The old AsyncStorage `crm.token:*` key is purged.
-- `services/api.ts` refreshes once on 401 (single-flight), stores the rotated pair and retries. Logout posts the refresh token so the server revokes the session.
+- The refresh token is kept in **Expo SecureStore** (Keychain/Keystore), keyed per API base URL (`src/lib/tokens.ts`). The access token lives in memory only; neither token reaches AsyncStorage, React state or screens.
+- `src/lib/api.ts` creates the single `@crm/api-client` instance in bearer mode: one shared refresh on 401, the rotated pair is stored before the retry, and a rejected refresh (401/403) clears the tokens and ends the session. Logout posts the refresh token so the server revokes the session. See `MOBILE.md`.
 - `expo-secure-store` is a native module, so installed builds need a new EAS build.
 
 ## Server primitives (use these, never ad-hoc checks)
 
-- `authenticate` (`src/platform/auth/middleware.ts`) handles authentication plus verified tenant context. It sets `req.auth` (`AuthSubject`: userId, sessionId, organizationId, organizationPublicId, membershipId, roleKey, permissions), sets `req.user` (legacy `{userId, roleId, email, name}`), and fills the AsyncLocalStorage context `auth`.
-- `requirePermission(p)`, `requireAnyPermission(...p)` and `requireScope(p, 'organization')` all answer 403 with a generic message and no role details.
+- `authenticate` (`src/platform/auth/middleware.ts`) handles authentication plus verified tenant context. It sets `req.auth` (`AuthSubject`: userId, sessionId, organizationId, organizationPublicId, membershipId, roleKey, permissions), and fills the AsyncLocalStorage context `auth`.
+- `requirePermission(p)` and `requireScope(p, 'organization')` answer 403 with a generic message and no role details.
 - Services obtain the tenant only through `actorFrom(req.auth)` and `ownerFilter(actor, p)` / `assertMember` / `filterActiveMembers` from `src/platform/tenancy.ts` (Phase 3). Repositories take `(db, tenant, …)`, every read, update or delete includes `organization_id = $n`, and inserts take `organization_id` from `tenant`. Foreign ids from the body (assignees, lead_id, location_id, chat participants) are validated inside the organization.
-- **IDOR rule:** a record in another organization answers **404**. A record in the same organization but outside the caller's scope answers 403 (legacy behavior).
+- **IDOR rule:** a record in another organization answers **404**. A record in the same organization but outside the caller's scope answers 403.
 - **Audit:** `recordAuditEvent()` (`src/platform/audit.ts`) stamps organization, actor, request id, IP and user agent from context and redacts password, token, hash and key fields.
 - **Rate limiting:** an in-memory per-IP+email limiter covers login, refresh and password reset (`AUTH_RATE_LIMIT_MAX` per `AUTH_RATE_LIMIT_WINDOW_SECONDS`). Phase 7 moves it to a shared store.
 - **Plivo:** webhooks require a valid `X-Plivo-Signature-V3` over `PLIVO_WEBHOOK_URL` + suffix (SDK `validateV3Signature`). They fail closed when the URL is not configured.

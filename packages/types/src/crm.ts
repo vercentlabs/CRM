@@ -189,8 +189,6 @@ export interface ChatParticipant {
   is_online: boolean;
   full_name: string | null;
   username: string | null;
-  /** DEPRECATED legacy role id (display only). */
-  role_id: number | null;
 }
 
 export interface Conversation {
@@ -220,7 +218,6 @@ export interface ChatMessage {
   created_at: Timestamp;
   sender_name: string | null;
   sender_username: string | null;
-  sender_role_id: number | null;
 }
 
 export interface StoredFile {
@@ -275,8 +272,6 @@ export interface Member {
   full_name: string;
   email: string;
   username: string;
-  /** DEPRECATED legacy role id (1/2/3) for UI compatibility; null for custom roles. */
-  role_id: number | null;
   role_key: string;
   role_name: string;
   membership_id: number;

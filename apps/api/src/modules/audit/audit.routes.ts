@@ -1,6 +1,4 @@
-import { Router } from 'express';
 import { z } from 'zod';
-import { legacyPage, legacyPagination, legacyRoute } from '../../platform/http/legacy.js';
 import { offsetOf, optionalDate, optionalId, pageQuery } from '../../platform/http/query.js';
 import { controller, ok, paginationMeta, type ApiModule } from '../../platform/http/route.js';
 import { actorFrom } from '../../platform/tenancy.js';
@@ -62,35 +60,3 @@ export const auditModule: ApiModule = {
     },
   ],
 };
-
-/** DEPRECATED `/audit` adapter → same repository read. */
-export function legacyAuditRouter(): Router {
-  const router = Router();
-  router.get(
-    '/',
-    ...legacyRoute({
-      permission: 'settings.audit.read',
-      query: z.object(filterQuery).passthrough(),
-      handle: async ({ actor, query, req, res }) => {
-        const { page, limit } = legacyPage(req.query);
-        const { rows, total } = await listAuditLogs(
-          actor,
-          {
-            userId: query.user_id,
-            tableName: query.table_name,
-            action: query.action,
-            from: query.start_date,
-            to: query.end_date,
-          },
-          { limit, offset: (page - 1) * limit },
-        );
-        res.status(200).json({
-          success: true,
-          audit_logs: rows,
-          pagination: legacyPagination(page, limit, total),
-        });
-      },
-    }),
-  );
-  return router;
-}

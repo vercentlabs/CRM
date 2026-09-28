@@ -3,15 +3,12 @@ import {
   ALL_PERMISSIONS,
   BUILT_IN_ROLES,
   BUILT_IN_ROLE_KEYS,
-  LEGACY_ROLE_IDS,
   PERMISSIONS,
   PERMISSION_DESCRIPTIONS,
-  builtInRoleKeyForLegacyId,
   coversGrants,
   hasAllPermissions,
   hasAnyPermission,
   hasPermission,
-  isLegacyRoleId,
   isPermission,
   normalizeScope,
   scopeCovers,
@@ -71,12 +68,9 @@ describe('built-in roles', () => {
     expect(hasPermission(manager, 'settings.audit.read')).toBe(false);
   });
 
-  it('maps legacy numeric ids for response compatibility only', () => {
-    expect(LEGACY_ROLE_IDS).toEqual({ ADMIN: 1, MANAGER: 2, SALES: 3 });
-    expect(builtInRoleKeyForLegacyId(2)).toBe('manager');
-    expect(builtInRoleKeyForLegacyId('3')).toBe('sales');
-    expect(builtInRoleKeyForLegacyId(9)).toBeUndefined();
-    expect(isLegacyRoleId(4)).toBe(false);
+  it('has no numeric role ids (roles are keys; Phase 5 removed the legacy 1/2/3 aliases)', () => {
+    for (const key of BUILT_IN_ROLE_KEYS)
+      expect(BUILT_IN_ROLES[key]).not.toHaveProperty('legacyRoleId');
   });
 });
 

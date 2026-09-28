@@ -44,13 +44,3 @@ export function createHealthRouter(pool: Pick<DatabasePool, 'query'>): Router {
 
   return router;
 }
-
-/** DEPRECATED `GET /health` (historical shape) — use /api/v1/health/live|ready. */
-export function legacyHealthRouter(): Router {
-  const router = Router();
-  router.get('/', (_req, res) => {
-    res.setHeader('Deprecation', 'true');
-    res.json({ status: 'OK', uptime: process.uptime(), timestamp: new Date().toISOString() });
-  });
-  return router;
-}

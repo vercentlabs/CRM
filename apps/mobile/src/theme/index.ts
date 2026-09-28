@@ -15,13 +15,12 @@ export const lightTheme: Theme = {
   mode: 'light',
   colors: lightColors,
   spacing,
-  typography
+  typography,
 };
 
 export const darkTheme: Theme = {
   mode: 'dark',
   colors: darkColors,
   spacing,
-  typography
+  typography,
 };
-

@@ -1,32 +1,27 @@
+import { DarkTheme, DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import RootNavigator from './src/navigation/RootNavigator';
-import { AuthProvider } from './src/context/AuthContext';
-import { ThemeProvider, useTheme } from './src/theme/ThemeProvider';
-import React, { useMemo } from 'react';
-import { LogBox } from 'react-native';
+import { useMemo } from 'react';
+import { RootNavigator } from './src/navigation/RootNavigator';
+import { AppProviders } from './src/providers/AppProviders';
+import { useTheme } from './src/theme/ThemeProvider';
 
-LogBox.ignoreLogs(['SafeAreaView has been deprecated']);
-
-const AppShell = () => {
+function Shell() {
   const { theme, resolvedMode } = useTheme();
-
   const navigationTheme = useMemo(() => {
-    const baseTheme = resolvedMode === 'dark' ? DarkTheme : DefaultTheme;
+    const base = resolvedMode === 'dark' ? DarkTheme : DefaultTheme;
+    const c = theme.colors;
     return {
-      ...baseTheme,
+      ...base,
       colors: {
-        ...baseTheme.colors,
-        background: theme.colors.appShell,
-        card: theme.colors.card,
-        border: theme.colors.border,
-        text: theme.colors.foreground,
-        primary: theme.colors.brand
-      }
+        ...base.colors,
+        background: c.bg,
+        card: c.surface,
+        border: c.border,
+        text: c.fg,
+        primary: c.primary,
+      },
     };
   }, [resolvedMode, theme.colors]);
-
   return (
     <>
       <NavigationContainer theme={navigationTheme}>
@@ -35,16 +30,12 @@ const AppShell = () => {
       <StatusBar style={resolvedMode === 'dark' ? 'light' : 'dark'} />
     </>
   );
-};
+}
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <AuthProvider>
-          <AppShell />
-        </AuthProvider>
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <AppProviders>
+      <Shell />
+    </AppProviders>
   );
 }

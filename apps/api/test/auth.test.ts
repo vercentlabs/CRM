@@ -45,7 +45,12 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
       });
       expect(data.membership.role.key).toBe('manager');
       expect(data.permissions['crm.leads.read']).toBe('organization');
-      expect(data.user.roleId).toBe(2);
+      expect(data.user).toEqual({
+        id: fx.users.aManager.id,
+        email: fx.users.aManager.email,
+        name: expect.any(String),
+      });
+      expect(data.user).not.toHaveProperty('roleId');
       const claims = jwt.decode(data.accessToken) as jwt.JwtPayload;
       expect(claims.exp! - claims.iat!).toBe(900);
       expect(claims).not.toHaveProperty('roleId');
@@ -158,21 +163,33 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
         },
       );
       for (const token of [expired, forged, orgSwap]) {
-        expect((await call(base, 'GET', '/leads', { token })).status).toBe(401);
+        expect((await call(base, 'GET', '/api/v1/leads', { token })).status).toBe(401);
       }
-      expect((await call(base, 'GET', '/leads', { token: session.accessToken })).status).toBe(200);
+      expect(
+        (await call(base, 'GET', '/api/v1/leads', { token: session.accessToken })).status,
+      ).toBe(200);
     });
 
     it('stops working immediately when the membership is suspended', async () => {
       const victim = await loginMobile(base, fx.users.aSales2.email);
-      expect((await call(base, 'GET', '/leads', { token: victim.accessToken })).status).toBe(200);
+      expect((await call(base, 'GET', '/api/v1/leads', { token: victim.accessToken })).status).toBe(
+        200,
+      );
       const admin = await loginMobile(base, fx.users.aAdmin.email);
-      const suspend = await call(base, 'PATCH', `/users/${fx.users.aSales2.id}/status`, {
-        token: admin.accessToken,
-      });
+      const suspend = await call(
+        base,
+        'PATCH',
+        `/api/v1/organization/members/${fx.users.aSales2.id}`,
+        {
+          token: admin.accessToken,
+          body: { status: 'suspended' },
+        },
+      );
       expect(suspend.status).toBe(200);
-      expect(suspend.body.user.is_active).toBe(false);
-      expect((await call(base, 'GET', '/leads', { token: victim.accessToken })).status).toBe(401);
+      expect(suspend.body.data.membership_status).toBe('suspended');
+      expect((await call(base, 'GET', '/api/v1/leads', { token: victim.accessToken })).status).toBe(
+        401,
+      );
       expect(
         (
           await call(base, 'POST', '/api/v1/auth/refresh', {
@@ -180,8 +197,9 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
           })
         ).status,
       ).toBe(401);
-      await call(base, 'PATCH', `/users/${fx.users.aSales2.id}/status`, {
+      await call(base, 'PATCH', `/api/v1/organization/members/${fx.users.aSales2.id}`, {
         token: admin.accessToken,
+        body: { status: 'active' },
       });
     });
   });
@@ -195,7 +213,7 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
       expect(first.status).toBe(200);
       expect(first.body.data.refreshToken).not.toBe(session.refreshToken);
       expect(
-        (await call(base, 'GET', '/leads', { token: first.body.data.accessToken })).status,
+        (await call(base, 'GET', '/api/v1/leads', { token: first.body.data.accessToken })).status,
       ).toBe(200);
 
       // Replaying the rotated token is treated as theft: rejected and the whole session is revoked.
@@ -204,7 +222,7 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
       });
       expect(replay.status).toBe(401);
       expect(
-        (await call(base, 'GET', '/leads', { token: first.body.data.accessToken })).status,
+        (await call(base, 'GET', '/api/v1/leads', { token: first.body.data.accessToken })).status,
       ).toBe(401);
       const second = await call(base, 'POST', '/api/v1/auth/refresh', {
         body: { refreshToken: first.body.data.refreshToken },
@@ -228,7 +246,9 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
         graceSeconds: 60,
       });
       expect(concurrent).toEqual({ status: 'reused', revoked: false });
-      expect((await call(base, 'GET', '/leads', { token: session.accessToken })).status).toBe(200);
+      expect(
+        (await call(base, 'GET', '/api/v1/leads', { token: session.accessToken })).status,
+      ).toBe(200);
     });
 
     it('rejects unknown refresh tokens', async () => {
@@ -244,7 +264,9 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
       const session = await loginMobile(base, fx.users.aSales.email);
       const out = await call(base, 'POST', '/api/v1/auth/logout', { token: session.accessToken });
       expect(out.status).toBe(200);
-      expect((await call(base, 'GET', '/leads', { token: session.accessToken })).status).toBe(401);
+      expect(
+        (await call(base, 'GET', '/api/v1/leads', { token: session.accessToken })).status,
+      ).toBe(401);
       expect(
         (
           await call(base, 'POST', '/api/v1/auth/refresh', {
@@ -260,7 +282,9 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
         body: { refreshToken: session.refreshToken },
       });
       expect(out.status).toBe(200);
-      expect((await call(base, 'GET', '/leads', { token: session.accessToken })).status).toBe(401);
+      expect(
+        (await call(base, 'GET', '/api/v1/leads', { token: session.accessToken })).status,
+      ).toBe(401);
     });
   });
 
@@ -275,10 +299,17 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
       });
       expect(switched.status).toBe(200);
       expect(switched.body.data.organization.id).toBe(fx.orgB.publicId);
-      const leads = await call(base, 'GET', '/leads', { token: switched.body.data.accessToken });
-      expect(leads.body.leads.every((l: { name: string }) => l.name.startsWith('Beta'))).toBe(true);
+      const leads = await call(base, 'GET', '/api/v1/leads', {
+        token: switched.body.data.accessToken,
+      });
+      expect(leads.body.data.length).toBeGreaterThan(0);
+      expect(
+        leads.body.data.every((l: { full_name: string }) => l.full_name.startsWith('Beta')),
+      ).toBe(true);
       // The previous access token was bound to organization A and is no longer valid.
-      expect((await call(base, 'GET', '/leads', { token: session.accessToken })).status).toBe(401);
+      expect(
+        (await call(base, 'GET', '/api/v1/leads', { token: session.accessToken })).status,
+      ).toBe(401);
 
       const outsider = await loginMobile(base, fx.users.aSales.email);
       for (const organizationId of [fx.orgB.publicId, '00000000-0000-4000-8000-00000000abcd']) {
@@ -310,15 +341,15 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
       expect(res.headers.get('cache-control')).toBe('no-store');
 
       const cookie = `crm_at=${jar.crm_at!.value}`;
-      expect((await call(base, 'GET', '/leads', { headers: { cookie } })).status).toBe(200);
+      expect((await call(base, 'GET', '/api/v1/leads', { headers: { cookie } })).status).toBe(200);
 
       const lead = { full_name: 'Cookie Lead', mobile_number: '9000000001' };
-      expect((await call(base, 'POST', '/leads', { headers: { cookie }, body: lead })).status).toBe(
-        403,
-      );
+      expect(
+        (await call(base, 'POST', '/api/v1/leads', { headers: { cookie }, body: lead })).status,
+      ).toBe(403);
       expect(
         (
-          await call(base, 'POST', '/leads', {
+          await call(base, 'POST', '/api/v1/leads', {
             headers: { cookie, 'x-csrf-token': 'forged' },
             body: lead,
           })
@@ -326,7 +357,7 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
       ).toBe(403);
       expect(
         (
-          await call(base, 'POST', '/leads', {
+          await call(base, 'POST', '/api/v1/leads', {
             headers: { cookie, 'x-csrf-token': csrf },
             body: lead,
           })
@@ -353,9 +384,9 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
       });
       expect(out.status).toBe(200);
       expect(cookiesFrom(out.headers).crm_at!.attributes).toMatch(/Expires=Thu, 01 Jan 1970/);
-      expect((await call(base, 'GET', '/leads', { headers: { cookie: nextCookie } })).status).toBe(
-        401,
-      );
+      expect(
+        (await call(base, 'GET', '/api/v1/leads', { headers: { cookie: nextCookie } })).status,
+      ).toBe(401);
     });
 
     it('allows credentialed CORS only for allow-listed origins', async () => {
@@ -375,25 +406,26 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
     });
   });
 
-  describe('legacy /auth endpoints', () => {
-    it('login returns a session-backed token pair in the historical envelope', async () => {
-      const res = await call(base, 'POST', '/auth/login', {
-        body: { email: fx.users.aSales.email, password: PASSWORD },
-      });
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.data.user).toMatchObject({ id: fx.users.aSales.id, roleId: 3 });
-      expect((await call(base, 'GET', '/leads', { token: res.body.data.token })).status).toBe(200);
-
-      const bad = await call(base, 'POST', '/auth/login', {
-        body: { email: fx.users.aSales.email, password: 'Wrongpass123' },
-      });
-      expect(bad.status).toBe(401);
-      expect(bad.body.message).toBe('Invalid email or password');
-
-      const out = await call(base, 'POST', '/auth/logout', { token: res.body.data.token });
-      expect(out.status).toBe(200);
-      expect((await call(base, 'GET', '/leads', { token: res.body.data.token })).status).toBe(401);
+  describe('removed pre-v1 auth endpoints', () => {
+    it('answers the old body-token routes with a JSON 404 (no auth adapters remain)', async () => {
+      for (const [method, path] of [
+        ['POST', '/auth/login'],
+        ['POST', '/auth/refresh'],
+        ['POST', '/auth/logout'],
+        ['GET', '/users/me'],
+        ['POST', '/users/forgot-password'],
+      ] as const) {
+        const res = await call(
+          base,
+          method,
+          path,
+          method === 'GET' ? {} : { body: { email: fx.users.aSales.email, password: PASSWORD } },
+        );
+        expect(`${method} ${path} ${res.status}`).toBe(`${method} ${path} 404`);
+        expect(res.body.success).toBe(false);
+        expect(res.body.error.code).toBe('NOT_FOUND');
+        expect(JSON.stringify(res.body)).not.toMatch(/token/i);
+      }
     });
   });
 
@@ -405,14 +437,16 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
         `INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '1 hour')`,
         [fx.users.bSales.id, createHash('sha256').update(token).digest('hex')],
       );
-      const res = await call(base, 'POST', '/users/reset-password', {
+      const res = await call(base, 'POST', '/api/v1/auth/password/reset', {
         body: { token, newPassword: 'Newpassw0rd' },
       });
       expect(res.status).toBe(200);
-      expect((await call(base, 'GET', '/leads', { token: session.accessToken })).status).toBe(401);
+      expect(
+        (await call(base, 'GET', '/api/v1/leads', { token: session.accessToken })).status,
+      ).toBe(401);
       expect(
         (
-          await call(base, 'POST', '/users/reset-password', {
+          await call(base, 'POST', '/api/v1/auth/password/reset', {
             body: { token, newPassword: 'Newpassw0rd2' },
           })
         ).status,
@@ -430,10 +464,10 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
     });
 
     it('does not reveal whether an email exists', async () => {
-      const known = await call(base, 'POST', '/users/forgot-password', {
+      const known = await call(base, 'POST', '/api/v1/auth/password/forgot', {
         body: { email: fx.users.aSales.email },
       });
-      const unknown = await call(base, 'POST', '/users/forgot-password', {
+      const unknown = await call(base, 'POST', '/api/v1/auth/password/forgot', {
         body: { email: 'ghost@example.test' },
       });
       expect(known.status).toBe(200);
@@ -443,10 +477,11 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
 
   describe('SMTP diagnostics', () => {
     it('is no longer public and never returns error details', async () => {
-      expect((await call(base, 'POST', '/users/verify-email')).status).toBe(401);
+      expect((await call(base, 'POST', '/api/v1/settings/email/verify')).status).toBe(401);
       const sales = await loginMobile(base, fx.users.aSales.email);
       expect(
-        (await call(base, 'POST', '/users/verify-email', { token: sales.accessToken })).status,
+        (await call(base, 'POST', '/api/v1/settings/email/verify', { token: sales.accessToken }))
+          .status,
       ).toBe(403);
     });
   });

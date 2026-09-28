@@ -10,12 +10,11 @@ export interface AssignableRole {
   id: number;
   key: string;
   name: string;
-  legacyRoleId: number | null;
   grants: GrantMap;
 }
 
 const MEMBER_SELECT = `
-  SELECT u.id, u.full_name, u.email, u.username, r.legacy_role_id AS role_id, r.key AS role_key,
+  SELECT u.id, u.full_name, u.email, u.username, r.key AS role_key,
          r.name AS role_name, m.id AS membership_id, m.status AS membership_status,
          (m.status = 'active' AND COALESCE(u.is_active, true)) AS is_active
   FROM organization_memberships m
@@ -62,7 +61,7 @@ export async function findAssignableRole(
   key: string,
 ): Promise<AssignableRole | null> {
   const result = await db.query(
-    `SELECT r.id, r.key, r.name, r.legacy_role_id, ${GRANTS_JSON} AS grants
+    `SELECT r.id, r.key, r.name, ${GRANTS_JSON} AS grants
      FROM roles r LEFT JOIN role_permissions rp ON rp.role_id = r.id
      WHERE r.key = $2 AND ((r.organization_id IS NULL AND r.is_system) OR r.organization_id = $1)
      GROUP BY r.id ORDER BY r.organization_id NULLS LAST LIMIT 1`,
@@ -74,7 +73,6 @@ export async function findAssignableRole(
         id: row.id,
         key: row.key,
         name: row.name,
-        legacyRoleId: row.legacy_role_id,
         grants: toGrantMap(row.grants),
       }
     : null;

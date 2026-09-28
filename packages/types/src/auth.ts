@@ -1,8 +1,7 @@
-/** User summary. `roleId` is the DEPRECATED legacy id (1/2/3) for UI compatibility; null for custom roles. */
+/** User summary. Roles and permissions come from the active membership, never from the user. */
 export interface AuthUser {
   id: number;
   email: string;
-  roleId: number | null;
   name: string;
 }
 
@@ -13,14 +12,6 @@ export interface LoginRequest {
   organizationId?: string;
   /** 'web' receives HttpOnly cookies; 'mobile' receives tokens in the body. Default 'web'. */
   client?: 'web' | 'mobile';
-}
-
-/** Legacy `POST /auth/login` response `data`. */
-export interface LoginResponseData {
-  token: string;
-  refreshToken: string;
-  expiresIn: number;
-  user: AuthUser;
 }
 
 export interface OrganizationSummary {

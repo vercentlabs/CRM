@@ -64,7 +64,6 @@ export const member = (overrides: Partial<Member> = {}): Member => ({
   full_name: `Member ${seq}`,
   email: `m${seq}@example.test`,
   username: `m${seq}`,
-  role_id: null,
   role_key: 'sales',
   role_name: 'Sales',
   membership_id: seq,

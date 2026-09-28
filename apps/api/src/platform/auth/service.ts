@@ -58,7 +58,6 @@ export function sessionView(
       id: subject.userId,
       email: subject.email,
       name: subject.name,
-      roleId: subject.legacyRoleId,
     },
     organization: {
       id: subject.organizationPublicId,

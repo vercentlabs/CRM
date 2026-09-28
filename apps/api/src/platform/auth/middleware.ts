@@ -6,14 +6,6 @@ import { ACCESS_COOKIE, readCookie } from './cookies.js';
 import { loadAuthSubject, type AuthSubject } from './repository.js';
 import { verifyAccessToken, verifyCsrfToken } from './tokens.js';
 
-/** Legacy shape consumed by pre-Phase-2 controllers. `roleId` is display-only. */
-export interface LegacyRequestUser {
-  userId: number;
-  roleId: number | null;
-  email: string;
-  name: string;
-}
-
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
@@ -22,7 +14,6 @@ declare global {
       auth?: AuthSubject;
       /** How the access token arrived; cookie requests are CSRF-checked. */
       authTransport?: 'bearer' | 'cookie';
-      user?: LegacyRequestUser;
     }
   }
 }
@@ -65,12 +56,6 @@ export async function resolveAuth(req: Request): Promise<AuthSubject> {
 
   req.auth = subject;
   req.authTransport = extracted.transport;
-  req.user = {
-    userId: subject.userId,
-    roleId: subject.legacyRoleId,
-    email: subject.email,
-    name: subject.name,
-  };
   setContextAuth({
     userId: subject.userId,
     sessionId: subject.sessionId,
@@ -95,16 +80,6 @@ export function requirePermission(permission: Permission): RequestHandler {
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.auth) return next(AppError.unauthenticated());
     if (!req.auth.permissions.has(permission)) return next(AppError.forbidden(FORBIDDEN_MESSAGE));
-    next();
-  };
-}
-
-export function requireAnyPermission(...permissions: Permission[]): RequestHandler {
-  return (req: Request, _res: Response, next: NextFunction) => {
-    if (!req.auth) return next(AppError.unauthenticated());
-    if (!permissions.some((p) => req.auth!.permissions.has(p))) {
-      return next(AppError.forbidden(FORBIDDEN_MESSAGE));
-    }
     next();
   };
 }

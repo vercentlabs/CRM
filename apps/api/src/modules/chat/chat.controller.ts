@@ -10,7 +10,6 @@ export const participantSchema = z.object({
   is_online: z.boolean(),
   full_name: z.string().nullable(),
   username: z.string().nullable(),
-  role_id: z.number().nullable(),
 });
 
 export const conversationSchema = z.object({
@@ -40,7 +39,6 @@ export const chatMessageSchema = z.object({
   created_at: z.string(),
   sender_name: z.string().nullable(),
   sender_username: z.string().nullable(),
-  sender_role_id: z.number().nullable(),
 });
 
 export const listConversations = controller({

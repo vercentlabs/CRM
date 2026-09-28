@@ -17,7 +17,7 @@ src/
   cli/              operator commands (org bootstrap)
 ```
 
-Modules: `auth`, `organizations` (members, roles, invitations), `leads`, `customers`, `opportunities`, `tasks` (+ calendar), `followups`, `notes`, `calls` (+ Plivo webhooks), `messages`, `chat`, `files`, `locations`, `reports`, `settings`, `audit`, `market` (gold rate). A module only has the files it needs.
+Modules: `auth`, `organizations` (members, roles, invitations), `leads`, `customers`, `opportunities`, `tasks` (+ calendar), `followups`, `notes`, `calls` (+ Plivo webhooks), `messages`, `chat`, `files`, `locations`, `reports`, `settings`, `audit`, `market` (gold rate), `notifications`. A module only has the files it needs. Services publish domain events with `emit(tx, …)` from `platform/events.ts` inside their transaction; entitlement checks live in `platform/entitlements.ts` and usage counters in `platform/usage.ts` (see `RUNTIME_PLATFORM.md`).
 
 ## Request flow
 
@@ -103,4 +103,4 @@ The unversioned routes (`/leads`, `/users`, `/api/chat`, `/health`, …) and the
 | `/gold/gold-rate`, `/gold/gold/refresh`            | `/market/gold-rate[/refresh]`                                                 |
 | `/admin/dashboard`, `/health`                      | – (`/api/v1/health/{live,ready}`)                                             |
 
-Provider webhooks `/api/plivo/webhook/{answer,recording,status}` are the only routes outside `/api/v1`: stable, signature-verified URLs that were kept.
+Provider webhooks `/api/plivo/webhook/{answer,recording,status,message-status}` are the only routes outside `/api/v1`: stable, signature-verified URLs that were kept.

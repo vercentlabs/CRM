@@ -7,6 +7,7 @@ import type {
 } from '@crm/validation';
 import type { z } from 'zod';
 import { recordAuditEvent } from '../../platform/audit.js';
+import { emit } from '../../platform/events.js';
 import { pool } from '../../platform/db.js';
 import { AppError } from '../../platform/http/errors.js';
 import { assertMember, can, ownerFilter, type Actor } from '../../platform/tenancy.js';
@@ -108,7 +109,18 @@ export async function updateOpportunity(actor: Actor, id: number, patch: UpdateO
   ) {
     throw AppError.forbidden('Forbidden: You can only update opportunities assigned to you');
   }
-  const updatedFields = await opportunities.update(pool, actor, id, patch);
+  const updatedFields = await withTransaction(pool, async (tx) => {
+    const fields = await opportunities.update(tx, actor, id, patch);
+    if (patch.stage !== undefined && patch.stage !== current.stage) {
+      await emit(tx, actor, 'opportunity.stage_changed', id, {
+        opportunityId: id,
+        from: current.stage,
+        to: patch.stage,
+        assignedTo: current.assigned_to,
+      });
+    }
+    return fields;
+  });
   if (patch.stage !== undefined && patch.stage !== current.stage) {
     await recordAuditEvent({
       action: 'UPDATE_OPPORTUNITY_STAGE',

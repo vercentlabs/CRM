@@ -168,7 +168,11 @@ export interface Call {
 }
 
 export type MessageChannel = 'sms' | 'whatsapp';
-export type MessageStatus = 'Sent' | 'Delivered' | 'Failed';
+/**
+ * Delivery lifecycle: Queued (accepted by the API) → Sending (worker calling the
+ * provider) → Sent (provider accepted) → Delivered (provider report) | Failed.
+ */
+export type MessageStatus = 'Queued' | 'Sending' | 'Sent' | 'Delivered' | 'Failed';
 
 /** A message sent to a lead (SMS/WhatsApp), distinct from internal chat. */
 export interface LeadMessage {
@@ -179,8 +183,14 @@ export interface LeadMessage {
   subject: string | null;
   content: string;
   status: MessageStatus;
-  sent_at: Timestamp;
+  /** When the provider accepted the message; null while queued or if it failed. */
+  sent_at: Timestamp | null;
   created_at: Timestamp;
+  queued_at: Timestamp | null;
+  delivered_at: Timestamp | null;
+  failed_at: Timestamp | null;
+  /** Safe machine-readable reason when status is Failed (e.g. PROVIDER_NOT_CONFIGURED). */
+  failure_code: string | null;
   lead_name: string;
 }
 
@@ -221,7 +231,10 @@ export interface ChatMessage {
 }
 
 export interface StoredFile {
+  /** Public file id: pass it as `file_id` when sending the chat message. */
+  id: string;
   url: string;
+  /** Same value as `id` (kept for older clients). */
   fileId: string;
   name: string;
   size: number;
@@ -339,3 +352,25 @@ export interface LeadsOverTimePoint {
 }
 
 export type ReportPeriod = 'today' | 'week' | 'month';
+
+/** In-app notification for the signed-in member (`/notifications`). */
+export interface Notification {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  entity_type: 'lead' | 'task' | 'opportunity' | null;
+  entity_id: number | null;
+  read_at: Timestamp | null;
+  created_at: Timestamp;
+}
+
+/** `GET /organization/entitlements`: what the organization's plan enables. */
+export interface OrganizationEntitlements {
+  plan: { key: string; name: string };
+  subscriptionStatus: string;
+  features: Record<'reports.export' | 'messages.bulk' | 'files.upload', boolean>;
+  /** null = unlimited. */
+  limits: Record<'seats' | 'storage.bytes', number | null>;
+  usage: { seats: number; 'storage.bytes': number };
+}

@@ -89,10 +89,24 @@ export const CHANNEL_LABEL: Record<MessageChannel, string> = { sms: 'SMS', whats
 export const CHANNEL_OPTIONS = options(MESSAGE_CHANNELS, CHANNEL_LABEL);
 
 export const MESSAGE_STATUS_TONE: Record<MessageStatus, BadgeTone> = {
+  Queued: 'neutral',
+  Sending: 'neutral',
   Sent: 'info',
   Delivered: 'success',
   Failed: 'danger',
 };
+
+/** Readable reason for a failed lead message (codes come from the delivery worker). */
+export function messageFailureLabel(code: string | null): string | null {
+  if (!code) return null;
+  const known: Record<string, string> = {
+    CHANNEL_NOT_SUPPORTED: 'WhatsApp sending is not connected',
+    PROVIDER_NOT_CONFIGURED: 'SMS sending is not configured',
+    INVALID_RECIPIENT: 'Invalid phone number',
+    DELIVERY_UNKNOWN: 'Delivery could not be confirmed',
+  };
+  return known[code] ?? 'Not delivered';
+}
 
 /** Calls stay `Scheduled` while the provider connects them. */
 export const CALL_STATUS_LABEL: Record<CallStatus, string> = {

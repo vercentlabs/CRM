@@ -9,6 +9,7 @@ import type {
 import type { z } from 'zod';
 import { recordAuditEvent } from '../../platform/audit.js';
 import { pool } from '../../platform/db.js';
+import { emit } from '../../platform/events.js';
 import { AppError } from '../../platform/http/errors.js';
 import {
   assertMember,
@@ -105,7 +106,23 @@ export async function createLead(actor: Actor, input: CreateLeadInput): Promise<
   }
   await assertLocation(actor, input.location_id);
 
-  const id = await leads.insert(pool, actor, { ...input, assigned_to: assignedTo }, actor.userId);
+  const id = await withTransaction(pool, async (tx) => {
+    const created = await leads.insert(
+      tx,
+      actor,
+      { ...input, assigned_to: assignedTo },
+      actor.userId,
+    );
+    await emit(tx, actor, 'lead.created', created, { leadId: created, assignedTo });
+    if (assignedTo !== null) {
+      await emit(tx, actor, 'lead.assigned', created, {
+        leadId: created,
+        assignedTo,
+        previousAssignedTo: null,
+      });
+    }
+    return created;
+  });
   const { assigned_to: _ignored, ...auditValues } = input;
   await recordAuditEvent({
     action: 'CREATE_LEAD',
@@ -139,6 +156,20 @@ export async function updateLead(actor: Actor, id: number, patch: UpdateLeadInpu
   const converting = patch.status === 'Converted' && current.status !== 'Converted';
   const { updatedFields, customerId } = await withTransaction(pool, async (client) => {
     const updatedFields = await leads.update(client, actor, id, patch);
+    if (patch.status !== undefined && patch.status !== current.status) {
+      await emit(client, actor, 'lead.status_changed', id, {
+        leadId: id,
+        from: current.status,
+        to: patch.status,
+      });
+    }
+    if (patch.assigned_to !== undefined && patch.assigned_to !== current.assigned_to) {
+      await emit(client, actor, 'lead.assigned', id, {
+        leadId: id,
+        assignedTo: patch.assigned_to,
+        previousAssignedTo: current.assigned_to,
+      });
+    }
     let customerId: number | null = null;
     if (converting) {
       const lead = (await leads.findById(client, actor, id))!;
@@ -151,6 +182,9 @@ export async function updateLead(actor: Actor, id: number, patch: UpdateLeadInpu
           assigned_to: lead.assigned_to,
           created_by: actor.userId,
         });
+        if (customerId !== null) {
+          await emit(client, actor, 'customer.created', customerId, { customerId, leadId: id });
+        }
       }
     }
     return { updatedFields, customerId };
@@ -183,6 +217,13 @@ export async function assignLead(actor: Actor, id: number, input: AssignmentInpu
     const locked = await leads.lockById(client, actor, id);
     if (!locked) throw AppError.notFound(NOT_FOUND);
     await leads.update(client, actor, id, { assigned_to: input.assigned_to });
+    if (locked.assigned_to !== input.assigned_to) {
+      await emit(client, actor, 'lead.assigned', id, {
+        leadId: id,
+        assignedTo: input.assigned_to,
+        previousAssignedTo: locked.assigned_to,
+      });
+    }
     return locked.assigned_to;
   });
   await recordAuditEvent({
@@ -218,6 +259,12 @@ export async function createFollowupForLead(
       notes: input.notes ?? null,
     });
     await leads.update(client, actor, leadId, { next_call_at: input.scheduled_at });
+    await emit(client, actor, 'followup.scheduled', followup.id, {
+      followupId: followup.id,
+      leadId,
+      assignedTo: actor.userId,
+      scheduledAt: new Date(input.scheduled_at).toISOString(),
+    });
     return followup;
   });
   await recordAuditEvent({

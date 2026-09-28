@@ -21,6 +21,8 @@ import { FollowupsScreen } from '../modules/followups/FollowupsScreen';
 import { LeadsScreen } from '../modules/leads/LeadsScreen';
 import { LocationsScreen } from '../modules/locations/LocationsScreen';
 import { MessagesScreen } from '../modules/messages/MessagesScreen';
+import { useUnreadNotifications } from '../modules/notifications/hooks';
+import { NotificationsScreen } from '../modules/notifications/NotificationsScreen';
 import { NotesScreen } from '../modules/notes/NotesScreen';
 import { OpportunitiesScreen } from '../modules/opportunities/OpportunitiesScreen';
 import { MembersScreen } from '../modules/organization/MembersScreen';
@@ -36,6 +38,7 @@ const Drawer = createDrawerNavigator<DrawerParamList>();
 
 const SCREENS: Record<keyof DrawerParamList, ComponentType> = {
   Home: HomeScreen,
+  Notifications: NotificationsScreen,
   Leads: LeadsScreen,
   Followups: FollowupsScreen,
   Tasks: TasksScreen,
@@ -86,6 +89,7 @@ function DrawerContent(props: DrawerContentComponentProps) {
   const c = useColors();
   const toast = useToast();
   const unread = useChatUnread();
+  const unreadNotifications = useUnreadNotifications();
   const [switching, setSwitching] = useState<string | null>(null);
   const groups = useMemo(() => visibleMenu(canAny), [canAny]);
   const current = props.state.routeNames[props.state.index];
@@ -178,6 +182,12 @@ function DrawerContent(props: DrawerContentComponentProps) {
                 >
                   {item.label}
                 </Text>
+                {item.route === 'Notifications' && unreadNotifications > 0 ? (
+                  <Badge
+                    label={`${unreadNotifications > 99 ? '99+' : unreadNotifications} unread`}
+                    tone="danger"
+                  />
+                ) : null}
                 {item.route === 'Chat' && unread > 0 ? (
                   <Badge label={`${unread > 99 ? '99+' : unread} unread`} tone="danger" />
                 ) : null}

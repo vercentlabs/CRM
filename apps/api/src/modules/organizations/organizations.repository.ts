@@ -174,12 +174,14 @@ export async function insertMembership(
   db: Queryable,
   tenant: Tenant,
   data: { userId: number; roleId: number; status: 'active' | 'invited'; invitedBy: number },
-): Promise<void> {
-  await db.query(
+): Promise<number> {
+  const result = await db.query(
     `INSERT INTO organization_memberships (organization_id, user_id, role_id, status, invited_by, joined_at)
-     VALUES ($1, $2, $3, $4::varchar, $5, CASE WHEN $4::varchar = 'active' THEN now() END)`,
+     VALUES ($1, $2, $3, $4::varchar, $5, CASE WHEN $4::varchar = 'active' THEN now() END)
+     RETURNING id`,
     [tenant.organizationId, data.userId, data.roleId, data.status, data.invitedBy],
   );
+  return result.rows[0].id;
 }
 
 export async function updateIdentity(
@@ -193,6 +195,21 @@ export async function updateIdentity(
     data.username,
     userId,
   ]);
+}
+
+/** Organization id of a pending invitation of `userId` to an active organization. */
+export async function findInvitation(
+  db: Queryable,
+  publicId: string,
+  userId: number,
+): Promise<number | null> {
+  const result = await db.query(
+    `SELECT m.organization_id FROM organization_memberships m
+     JOIN organizations o ON o.id = m.organization_id
+     WHERE o.public_id::text = $1 AND o.status = 'active' AND m.user_id = $2 AND m.status = 'invited'`,
+    [publicId, userId],
+  );
+  return result.rows[0]?.organization_id ?? null;
 }
 
 /** Accepts an invitation of `userId` to the organization with public id `publicId`. */

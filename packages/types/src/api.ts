@@ -1,4 +1,4 @@
-/** Prefix for all versioned API routes. Unversioned legacy routes remain until Phase 3. */
+/** Prefix for all versioned API routes. */
 export const API_V1_PREFIX = '/api/v1';
 
 /** Correlation header accepted from clients and echoed on every API response. */
@@ -16,6 +16,10 @@ export const ERROR_CODES = [
   'RATE_LIMITED',
   'INTERNAL_ERROR',
   'SERVICE_UNAVAILABLE',
+  /** The organization's plan does not include this capability (403). */
+  'FEATURE_NOT_ENABLED',
+  /** A plan limit such as seats would be exceeded (409). */
+  'PLAN_LIMIT_REACHED',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];

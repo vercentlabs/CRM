@@ -38,7 +38,16 @@ describe('permission-driven navigation', () => {
     const labels = visibleMenu(canAnyFor(salesPermissions)).flatMap((g) =>
       g.items.map((i) => i.route),
     );
-    expect(labels).toEqual(['Home', 'Tasks', 'Calendar', 'Followups', 'Leads', 'Calls', 'Account']);
+    expect(labels).toEqual([
+      'Home',
+      'Notifications',
+      'Tasks',
+      'Calendar',
+      'Followups',
+      'Leads',
+      'Calls',
+      'Account',
+    ]);
     // Admin-only groups disappear entirely.
     expect(visibleMenu(canAnyFor(salesPermissions)).map((g) => g.label)).not.toContain('Insights');
   });

@@ -22,6 +22,7 @@ import {
   LEAD_STATUS_TONE,
   leadSourceLabel,
   MESSAGE_STATUS_TONE,
+  messageFailureLabel,
   STAGE_TONE,
 } from '../../lib/labels';
 import type { RootScreenProps } from '../../navigation/types';
@@ -229,7 +230,10 @@ function LeadMessages({ lead }: { lead: Lead }) {
           <View key={m.id} style={styles.message}>
             <View style={styles.item}>
               <Text variant="caption" color="muted" style={{ flex: 1 }}>
-                {channelLabel(m.message_type)} · {formatDateTime(m.sent_at)}
+                {channelLabel(m.message_type)} · {formatDateTime(m.sent_at ?? m.created_at)}
+                {m.status === 'Failed' && m.failure_code
+                  ? ` · ${messageFailureLabel(m.failure_code)}`
+                  : ''}
               </Text>
               <Badge label={m.status} tone={MESSAGE_STATUS_TONE[m.status]} />
             </View>

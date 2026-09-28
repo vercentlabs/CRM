@@ -12,6 +12,7 @@ import { leadsModule } from './leads/leads.routes.js';
 import { locationsModule } from './locations/locations.routes.js';
 import { marketModule } from './market/market.routes.js';
 import { messagesModule } from './messages/messages.routes.js';
+import { notificationsModule } from './notifications/notifications.routes.js';
 import { notesModule } from './notes/notes.routes.js';
 import { opportunitiesModule } from './opportunities/opportunities.routes.js';
 import { organizationsModule } from './organizations/organizations.routes.js';
@@ -39,6 +40,7 @@ export const apiModules: ApiModule[] = [
   settingsModule,
   auditModule,
   marketModule,
+  notificationsModule,
 ];
 
 /** Provider webhooks: stable, signature-verified URLs outside /api/v1 (not deprecated). */

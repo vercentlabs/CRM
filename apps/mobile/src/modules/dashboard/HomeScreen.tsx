@@ -3,11 +3,21 @@ import { useNavigation } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { ListRow } from '../../components/lists/PagedList';
-import { Badge, Button, Card, ErrorState, LoadingState, Screen, Text } from '../../components/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  ErrorState,
+  IconButton,
+  LoadingState,
+  Screen,
+  Text,
+} from '../../components/ui';
 import { api } from '../../lib/api';
 import { formatDateTime, formatNumber, formatRelative, isPast } from '../../lib/format';
 import { LEAD_STATUS_TONE } from '../../lib/labels';
 import { useQueryKey, useSession } from '../../providers/SessionProvider';
+import { useUnreadNotifications } from '../notifications/hooks';
 import { useColors } from '../../theme/ThemeProvider';
 
 /** Today at a glance, built only from what the member's permissions allow. */
@@ -35,6 +45,7 @@ export function HomeScreen() {
     queryFn: () => api().v1.leads.list({ page: 1, limit: 5, sort: '-created_at' }),
     enabled: can('crm.leads.read'),
   });
+  const unreadNotifications = useUnreadNotifications();
   const gold = useQuery({
     queryKey: key('market', 'gold'),
     queryFn: () => api().v1.market.goldRate(),
@@ -47,7 +58,31 @@ export function HomeScreen() {
   const first = user?.name.split(' ')[0] ?? '';
 
   return (
-    <Screen title={`Hello, ${first}`} subtitle={organization?.name}>
+    <Screen
+      title={`Hello, ${first}`}
+      subtitle={organization?.name}
+      actions={
+        <IconButton
+          icon="bell"
+          label={
+            unreadNotifications > 0
+              ? `Notifications, ${unreadNotifications} unread`
+              : 'Notifications'
+          }
+          badge={
+            unreadNotifications > 0 ? (
+              <View style={styles.bellBadge} pointerEvents="none">
+                <Badge
+                  label={unreadNotifications > 99 ? '99+' : String(unreadNotifications)}
+                  tone="danger"
+                />
+              </View>
+            ) : undefined
+          }
+          onPress={() => navigation.navigate('Main', { screen: 'Notifications' })}
+        />
+      }
+    >
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
@@ -218,6 +253,7 @@ function Rows<T>({
 }
 
 const styles = StyleSheet.create({
+  bellBadge: { position: 'absolute', top: -2, right: -6 },
   content: { padding: 16, gap: 12 },
   stats: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   stat: { flexGrow: 1, flexBasis: '30%', borderWidth: 1, borderRadius: 12, padding: 12 },

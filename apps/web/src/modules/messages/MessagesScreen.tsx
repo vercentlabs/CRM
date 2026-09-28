@@ -7,7 +7,7 @@ import { PermissionGate } from '@/components/auth/PermissionGate';
 import { DataTable, type Column } from '@/components/data-table/DataTable';
 import { useListParams } from '@/hooks/useListParams';
 import { formatDateTime } from '@/lib/format';
-import { MESSAGE_STATUS_TONE } from '@/lib/labels';
+import { MESSAGE_STATUS_TONE, messageFailureLabel } from '@/lib/labels';
 import { useSession } from '@/providers/SessionProvider';
 import { useLeadMessages } from './hooks';
 import { SendMessageForm } from './SendMessageForm';
@@ -42,7 +42,14 @@ export function MessagesScreen() {
     {
       id: 'status',
       header: 'Status',
-      cell: (m) => <Badge tone={MESSAGE_STATUS_TONE[m.status]}>{m.status}</Badge>,
+      cell: (m) => (
+        <span className="inline-flex flex-col gap-0.5">
+          <Badge tone={MESSAGE_STATUS_TONE[m.status]}>{m.status}</Badge>
+          {m.status === 'Failed' && m.failure_code && (
+            <span className="text-xs text-muted">{messageFailureLabel(m.failure_code)}</span>
+          )}
+        </span>
+      ),
     },
     { id: 'sent', header: 'Sent', hideBelow: 'md', cell: (m) => formatDateTime(m.sent_at) },
   ];

@@ -24,6 +24,8 @@ import type {
   Member,
   MembershipSummary,
   Note,
+  Notification,
+  OrganizationEntitlements,
   Opportunity,
   OpportunityStage,
   PaginationMeta,
@@ -170,6 +172,8 @@ export function createResources(t: V1Transport) {
         }>('/organization'),
       members: (query?: PageQuery) => page<Member>('/organization/members', query),
       roles: () => get<RoleDefinition[]>('/organization/roles'),
+      /** What the organization's plan enables, with current usage (never pricing data). */
+      entitlements: () => get<OrganizationEntitlements>('/organization/entitlements'),
       addMember: (body: CreateMemberInput) => post<Member>('/organization/members', body),
       updateMember: (userId: number, body: UpdateMemberInput) =>
         patch<Member>(`/organization/members/${userId}`, body),
@@ -275,6 +279,8 @@ export function createResources(t: V1Transport) {
           timeoutMs: 60_000,
         });
       },
+      /** Deletes an uploaded file (metadata immediately; storage asynchronously). */
+      remove: (fileId: string) => del(`/files/${enc(fileId)}`),
     },
     locations: {
       list: () => get<SalesLocation[]>('/locations'),
@@ -312,6 +318,13 @@ export function createResources(t: V1Transport) {
     },
     audit: {
       list: (query?: AuditListQuery) => page<AuditLogEntry>('/audit-logs', query),
+    },
+    notifications: {
+      list: (query?: PageQuery & { unread?: boolean }) =>
+        page<Notification>('/notifications', query),
+      unreadCount: () => get<{ count: number }>('/notifications/unread-count'),
+      markRead: (id: string) => post<{ read: true }>(`/notifications/${enc(id)}/read`),
+      markAllRead: () => post<{ updated: number }>('/notifications/read-all'),
     },
     market: {
       goldRate: () => get<GoldRate>('/market/gold-rate'),

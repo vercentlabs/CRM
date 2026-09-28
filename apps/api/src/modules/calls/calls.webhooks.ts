@@ -1,5 +1,6 @@
 import express, { Router } from 'express';
 import { verifyPlivoSignature } from '../../platform/plivo-signature.js';
+import * as messages from '../messages/messages.service.js';
 import * as service from './calls.service.js';
 import { errorFields, logger } from '../../platform/logger.js';
 
@@ -58,6 +59,18 @@ export function plivoWebhookRouter(): Router {
       })
       .catch((error) => logFailure('status', error));
     res.status(200).json({ message: 'Call status received' });
+  });
+
+  /** SMS delivery reports: a small idempotent update, then an immediate 200. */
+  router.post('/webhook/message-status', async (req, res) => {
+    await messages
+      .onProviderStatus({
+        messageUuid: field(req.body, 'MessageUUID'),
+        status: field(req.body, 'Status'),
+        errorCode: field(req.body, 'ErrorCode'),
+      })
+      .catch((error) => logFailure('message-status', error));
+    res.status(200).json({ message: 'Message status received' });
   });
 
   return router;

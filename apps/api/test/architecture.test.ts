@@ -110,4 +110,37 @@ describe('architecture', () => {
     const imports = all.filter((f) => /from '.*auth\.middleware/.test(read(f)));
     expect(imports.map(rel)).toEqual([]);
   });
+
+  describe('runtime platform (Phase 6)', () => {
+    const sources = all.filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
+
+    it('publishes domain events only through the approved transactional mechanism', () => {
+      // Services call platform/events.ts `emit(tx, …)`; appendEvent directly only for the
+      // platform (organization-less) password-reset event.
+      const direct = sources.filter((f) => /\bappendEvent\(/.test(read(f))).map(rel);
+      expect(direct.sort()).toEqual(['modules/auth/password.service.ts', 'platform/events.ts']);
+      // Never with the pool: the event must share the domain change's transaction.
+      expect(sources.filter((f) => /\bemit\(\s*pool\b/.test(read(f))).map(rel)).toEqual([]);
+    });
+
+    it('keeps queue internals and provider SDKs out of the API domain', () => {
+      expect(sources.filter((f) => /from '(bullmq|ioredis)'/.test(read(f))).map(rel)).toEqual([]);
+      const sdk = sources.filter((f) => /from '(imagekit|nodemailer)'/.test(read(f))).map(rel);
+      expect(sdk).toEqual([]);
+      const plivo = sources
+        .filter((f) => /from 'plivo'/.test(read(f)))
+        .map(rel)
+        .sort();
+      expect(plivo).toEqual(['integrations/plivo.ts', 'platform/plivo-signature.ts']);
+    });
+
+    it('never checks plan names (entitlements are resolved through @crm/entitlements)', () => {
+      const offenders = sources.filter((f) =>
+        /plan(\.key|Key|_key)?\s*[!=]==\s*['"]|['"](base|free|premium|pro|enterprise)['"]\s*[!=]==\s*\w*plan/i.test(
+          read(f),
+        ),
+      );
+      expect(offenders.map(rel)).toEqual([]);
+    });
+  });
 });

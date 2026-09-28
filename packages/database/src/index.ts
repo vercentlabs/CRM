@@ -25,3 +25,9 @@ export {
   type MigrationFile,
   type MigrationStatusEntry,
 } from './migrations/runner.js';
+export {
+  TEST_DATABASE_URL,
+  createTestSchema,
+  hasTestDatabase,
+  type TestSchema,
+} from './testing.js';

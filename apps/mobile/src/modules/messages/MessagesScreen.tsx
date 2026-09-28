@@ -11,7 +11,7 @@ import {
 } from '../../components/ui';
 import { api } from '../../lib/api';
 import { formatDateTime } from '../../lib/format';
-import { MESSAGE_STATUS_TONE } from '../../lib/labels';
+import { MESSAGE_STATUS_TONE, messageFailureLabel } from '../../lib/labels';
 import { useSession } from '../../providers/SessionProvider';
 
 /** SMS/WhatsApp messages sent to leads (not internal chat). */
@@ -63,7 +63,13 @@ export function MessagesScreen() {
             <ListRow
               title={m.lead_name}
               subtitle={m.content}
-              meta={`${m.message_type} · ${formatDateTime(m.sent_at)}`}
+              meta={[
+                m.message_type,
+                formatDateTime(m.sent_at ?? m.created_at),
+                m.status === 'Failed' ? messageFailureLabel(m.failure_code) : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
               onPress={() => navigation.navigate('LeadDetail', { id: m.lead_id })}
               trailing={<Badge label={m.status} tone={MESSAGE_STATUS_TONE[m.status]} />}
             />

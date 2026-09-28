@@ -1,0 +1,36 @@
+{
+  "name": "@crm/integrations",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Provider adapters (storage, email, SMS) and outbound webhook primitives behind small interfaces",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "imagekit": "^4.1.4",
+    "nodemailer": "^6.9.7",
+    "plivo": "^4.0.0"
+  },
+  "devDependencies": {
+    "@crm/config": "workspace:*",
+    "@types/node": "^22.19.0",
+    "@types/nodemailer": "^6.4.24",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.2"
+  }
+}

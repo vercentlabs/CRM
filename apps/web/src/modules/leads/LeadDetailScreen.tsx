@@ -22,6 +22,7 @@ import {
   CHANNEL_LABEL,
   LEAD_STATUS_OPTIONS,
   MESSAGE_STATUS_TONE,
+  messageFailureLabel,
   STAGE_TONE,
   leadSourceLabel,
 } from '@/lib/labels';
@@ -296,7 +297,10 @@ function LeadMessagesCard({ lead }: { lead: Lead }) {
                       : message.message_type === 'WhatsApp'
                         ? CHANNEL_LABEL.whatsapp
                         : message.message_type}{' '}
-                    · {formatDateTime(message.sent_at)}
+                    · {formatDateTime(message.sent_at ?? message.created_at)}
+                    {message.status === 'Failed' && message.failure_code
+                      ? ` · ${messageFailureLabel(message.failure_code)}`
+                      : ''}
                   </span>
                   <Badge tone={MESSAGE_STATUS_TONE[message.status]}>{message.status}</Badge>
                 </div>

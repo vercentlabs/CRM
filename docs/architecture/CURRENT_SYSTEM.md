@@ -1,4 +1,4 @@
-# Current System (updated after Phase 5, 2026-09-28)
+# Current System (updated after Phase 6, 2026-09-29)
 
 A snapshot of what exists, so later phases don't have to rediscover it. Paths are post-Phase-1.
 
@@ -9,7 +9,7 @@ A snapshot of what exists, so later phases don't have to rediscover it. Paths ar
 | API    | `apps/api`    | Node ≥22, Express 5, strict TypeScript, `pg`                                                                | Modular monolith since Phase 3 (`src/modules/<domain>`); see `API.md`.                  |
 | Web    | `apps/web`    | Next.js 16 (App Router, React Compiler), React 19.2, TanStack Query, React Hook Form, Tailwind 4, `@crm/ui` | TypeScript since Phase 4; `/api/v1` only through `@crm/api-client`; see `WEB.md`.       |
 | Mobile | `apps/mobile` | Expo SDK 54, React Native 0.81, React 19.1, React Navigation 7, TanStack Query, React Hook Form             | TypeScript (strict). `/api/v1` only through `@crm/api-client`; see `MOBILE.md`.         |
-| Worker | `apps/worker` | TypeScript                                                                                                  | Phase 1 skeleton only; no jobs yet.                                                     |
+| Worker | `apps/worker` | TypeScript, BullMQ (Redis)                                                                                  | Outbox relay, queues, reminders, maintenance; see `RUNTIME_PLATFORM.md`.                |
 | DB     | PostgreSQL    | `packages/database`                                                                                         | Multi-tenant schema (0001–0004), serial integer PKs; see `packages/database/README.md`. |
 
 Before Phase 1 the apps lived at `crm-backend/`, `c-frontend/c-frontend/crm-frontend/` and `crm-mobile/crm-mobile/crm-mobile/`, each with its own lockfile.

@@ -1,6 +1,6 @@
 import {
   bulkMessageSchema,
-  MESSAGE_STATUSES,
+  MESSAGE_DELIVERY_STATUSES,
   messageStatusSchema,
   sendMessageSchema,
 } from '@crm/validation';
@@ -17,9 +17,13 @@ export const leadMessageSchema = z.object({
   message_type: z.enum(['SMS', 'Email', 'WhatsApp']),
   subject: z.string().nullable(),
   content: z.string(),
-  status: z.enum(MESSAGE_STATUSES),
-  sent_at: z.string(),
+  status: z.enum(MESSAGE_DELIVERY_STATUSES),
+  sent_at: z.string().nullable(),
   created_at: z.string(),
+  queued_at: z.string().nullable(),
+  delivered_at: z.string().nullable(),
+  failed_at: z.string().nullable(),
+  failure_code: z.string().nullable(),
   lead_name: z.string(),
 });
 

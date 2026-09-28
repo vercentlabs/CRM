@@ -11,6 +11,8 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   RATE_LIMITED: 429,
   INTERNAL_ERROR: 500,
   SERVICE_UNAVAILABLE: 503,
+  FEATURE_NOT_ENABLED: 403,
+  PLAN_LIMIT_REACHED: 409,
 };
 
 export function statusForCode(code: ErrorCode): number {

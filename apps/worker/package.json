@@ -2,7 +2,7 @@
   "name": "@crm/worker",
   "version": "0.0.0",
   "private": true,
-  "description": "Background job worker (foundation; queues arrive in Phase 6)",
+  "description": "Background worker: transactional outbox relay, BullMQ consumers, reminders and maintenance",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -11,11 +11,17 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "queue:check": "node dist/queue-check.js"
   },
   "dependencies": {
     "@crm/config": "workspace:*",
+    "@crm/database": "workspace:*",
+    "@crm/events": "workspace:*",
+    "@crm/integrations": "workspace:*",
+    "bullmq": "^6.3.9",
     "dotenv": "^17.2.3",
+    "ioredis": "^6.0.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {

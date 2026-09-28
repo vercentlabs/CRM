@@ -204,8 +204,8 @@ function Thread({ conversation, onBack }: { conversation: Conversation; onBack: 
         input: {
           content: stored.name,
           message_type: stored.fileType.startsWith('image/') ? 'image' : 'file',
-          attachment_url: stored.url,
-          file_type: stored.fileType,
+          // The server takes the URL and type from the uploaded file's record.
+          file_id: stored.id,
         },
       });
     } catch (error) {

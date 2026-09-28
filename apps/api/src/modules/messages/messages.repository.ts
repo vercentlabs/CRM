@@ -9,7 +9,7 @@ import type { Tenant } from '../../platform/tenancy.js';
 
 const SELECT = `
   SELECT m.id, m.lead_id, m.user_id, m.message_type, m.subject, m.content, m.status, m.sent_at, m.created_at,
-         l.full_name AS lead_name
+         m.queued_at, m.delivered_at, m.failed_at, m.failure_code, l.full_name AS lead_name
   FROM messages m
   JOIN leads l ON l.id = m.lead_id AND l.organization_id = m.organization_id`;
 
@@ -32,7 +32,7 @@ export async function list(
   const limitSql =
     paging === 'all' ? '' : `LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
   const [rows, count] = await Promise.all([
-    db.query(`${SELECT} ${where} ORDER BY m.sent_at DESC, m.id DESC ${limitSql}`, [
+    db.query(`${SELECT} ${where} ORDER BY m.created_at DESC, m.id DESC ${limitSql}`, [
       ...params,
       ...(paging === 'all' ? [] : [paging.limit, paging.offset]),
     ]),
@@ -59,8 +59,8 @@ export async function insert(
   data: { lead_id: number; user_id: number; message_type: string; content: string },
 ): Promise<number> {
   const result = await db.query(
-    `INSERT INTO messages (organization_id, lead_id, user_id, message_type, content, status)
-     VALUES ($1, $2, $3, $4, $5, 'Sent') RETURNING id`,
+    `INSERT INTO messages (organization_id, lead_id, user_id, message_type, content, status, queued_at)
+     VALUES ($1, $2, $3, $4, $5, 'Queued', now()) RETURNING id`,
     [tenant.organizationId, data.lead_id, data.user_id, data.message_type, data.content],
   );
   return result.rows[0].id;
@@ -81,5 +81,36 @@ export async function setStatus(
     sql += ' AND user_id = $4';
   }
   const result = await db.query(sql, params);
+  return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Provider delivery report (system context: the provider callback carries no
+ * organization, so the unique (provider, provider_message_id) identifies the
+ * row — the same documented exception as call webhooks). Transitions only move
+ * forward: a replayed or out-of-order callback never downgrades a message.
+ */
+export async function applyProviderReport(
+  db: Queryable,
+  report: {
+    provider: string;
+    providerMessageId: string;
+    outcome: 'delivered' | 'failed';
+    failureCode: string | null;
+  },
+): Promise<boolean> {
+  const result =
+    report.outcome === 'delivered'
+      ? await db.query(
+          `UPDATE messages SET status = 'Delivered', delivered_at = COALESCE(delivered_at, now())
+           WHERE provider = $1 AND provider_message_id = $2 AND status IN ('Sending', 'Sent')`,
+          [report.provider, report.providerMessageId],
+        )
+      : await db.query(
+          `UPDATE messages SET status = 'Failed', failed_at = COALESCE(failed_at, now()),
+                              failure_code = $3, failure_message = 'Reported undelivered by the provider'
+           WHERE provider = $1 AND provider_message_id = $2 AND status IN ('Sending', 'Sent')`,
+          [report.provider, report.providerMessageId, report.failureCode],
+        );
   return (result.rowCount ?? 0) > 0;
 }

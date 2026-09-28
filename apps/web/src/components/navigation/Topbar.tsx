@@ -15,6 +15,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
 import { errorMessage } from '@/lib/errors';
+import { NotificationBell } from '@/modules/notifications/NotificationBell';
 import { useSession } from '@/providers/SessionProvider';
 import { useTheme } from '@/providers/ThemeProvider';
 import { CommandPalette } from './CommandPalette';
@@ -60,6 +61,7 @@ export function Topbar({ groups, menuButton }: { groups: NavGroup[]; menuButton:
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} groups={groups} />
 
       <div className="ml-auto flex items-center gap-1">
+        <NotificationBell />
         {switchable.length > 1 && (
           <DropdownMenu
             label={`Organization: ${organization?.name ?? ''}. Switch organization`}

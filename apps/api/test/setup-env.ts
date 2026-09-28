@@ -5,6 +5,7 @@ const defaults: Record<string, string> = {
   NODE_ENV: 'test',
   DATABASE_URL: process.env.TEST_DATABASE_URL ?? 'postgresql://crm:crm@127.0.0.1:1/crm_test',
   JWT_SECRET: 'test-only-jwt-secret-not-used-anywhere-else',
+  STORAGE_PROVIDER: 'memory',
   IMAGEKIT_PUBLIC_KEY: 'test',
   IMAGEKIT_PRIVATE_KEY: 'test',
   IMAGEKIT_URL_ENDPOINT: 'https://ik.imagekit.io/test',

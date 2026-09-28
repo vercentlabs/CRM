@@ -5,6 +5,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 /** Top-level destinations (drawer). Which ones exist depends on permissions. */
 export type DrawerParamList = {
   Home: undefined;
+  Notifications: undefined;
   Leads: undefined;
   Followups: undefined;
   Tasks: undefined;

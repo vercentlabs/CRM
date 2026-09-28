@@ -49,6 +49,10 @@ export const LeadIcon = icon(['M12 3a6 6 0 0 0-3 11.2V17h6v-2.8A6 6 0 0 0 12 3z'
 export const BriefcaseIcon = icon(['M4 7h16v12H4z', 'M9 7V5h6v2', 'M4 12h16']);
 export const CheckSquareIcon = icon(['M4 4h16v16H4z', 'M8 12l3 3 5-6']);
 export const CalendarIcon = icon(['M4 6h16v14H4z', 'M4 10h16', 'M8 3v4', 'M16 3v4']);
+export const BellIcon = icon([
+  'M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9',
+  'M10.3 21a1.94 1.94 0 0 0 3.4 0',
+]);
 export const ClockIcon = icon(['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v5l3 2']);
 export const NoteIcon = icon(['M6 3h9l3 3v15H6z', 'M9 10h6', 'M9 14h6', 'M9 18h4']);
 export const PhoneIcon = icon([

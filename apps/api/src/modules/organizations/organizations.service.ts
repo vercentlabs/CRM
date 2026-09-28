@@ -8,6 +8,13 @@ import type { z } from 'zod';
 import { recordAuditEvent } from '../../platform/audit.js';
 import { listMemberships, revokeUserSessions } from '../../platform/auth/repository.js';
 import { pool } from '../../platform/db.js';
+import {
+  assertSeatAvailable,
+  countActiveSeats,
+  getEntitlements,
+} from '../../platform/entitlements.js';
+import { readUsage } from '../../platform/usage.js';
+import { emit } from '../../platform/events.js';
 import { AppError } from '../../platform/http/errors.js';
 import type { Actor } from '../../platform/tenancy.js';
 import * as orgs from './organizations.repository.js';
@@ -75,7 +82,16 @@ export async function setStatus(
   status: 'active' | 'suspended',
 ): Promise<void> {
   await assertManageable(actor, targetUserId);
-  await orgs.setMemberStatus(pool, actor, targetUserId, status);
+  const current = await getMember(actor, targetUserId);
+  if (status === 'active' && current.membership_status === 'suspended') {
+    // Reactivation takes a seat: checked under the organization lock.
+    await withTransaction(pool, async (tx) => {
+      await assertSeatAvailable(tx, actor.organizationId);
+      await orgs.setMemberStatus(tx, actor, targetUserId, status);
+    });
+  } else {
+    await orgs.setMemberStatus(pool, actor, targetUserId, status);
+  }
   if (status === 'suspended')
     await revokeUserSessions(targetUserId, 'membership_suspended', actor.organizationId);
   await recordAuditEvent({
@@ -161,11 +177,19 @@ export async function addMember(
   if (existingId !== null) {
     if (await orgs.findMember(pool, actor, existingId))
       throw AppError.conflict('This user is already a member of the organization');
-    await orgs.insertMembership(pool, actor, {
-      userId: existingId,
-      roleId: input.role.id,
-      status: 'invited',
-      invitedBy: actor.userId,
+    // Invitations do not take a seat until accepted.
+    await withTransaction(pool, async (tx) => {
+      const membershipId = await orgs.insertMembership(tx, actor, {
+        userId: existingId,
+        roleId: input.role.id,
+        status: 'invited',
+        invitedBy: actor.userId,
+      });
+      await emit(tx, actor, 'member.invited', membershipId, {
+        membershipId,
+        userId: existingId,
+        roleKey: input.role.key,
+      });
     });
     await recordAuditEvent({
       action: 'MEMBER_INVITED',
@@ -181,6 +205,7 @@ export async function addMember(
   let userId: number;
   try {
     userId = await withTransaction(pool, async (client) => {
+      await assertSeatAvailable(client, actor.organizationId);
       const id = await orgs.insertIdentity(client, {
         username,
         fullName: input.full_name,
@@ -209,6 +234,16 @@ export async function addMember(
   return { member: await getMember(actor, userId), created: true };
 }
 
+/** Plan state for members: entitlements plus the usage they are measured against. */
+export async function organizationEntitlements(actor: Actor) {
+  const [entitlements, seats, storage] = await Promise.all([
+    getEntitlements(actor.organizationId),
+    countActiveSeats(pool, actor.organizationId),
+    readUsage(pool, actor.organizationId, 'storage.bytes'),
+  ]);
+  return { ...entitlements, usage: { seats, 'storage.bytes': storage } };
+}
+
 /** Organizations the user may switch to (active) or accept (invited). */
 export async function myOrganizations(actor: Actor) {
   const memberships = await listMemberships(actor.userId);
@@ -230,7 +265,12 @@ export async function acceptInvitation(
   userId: number,
   organizationPublicId: string,
 ): Promise<void> {
-  const organizationId = await orgs.acceptInvitation(pool, organizationPublicId, userId);
+  const organizationId = await withTransaction(pool, async (tx) => {
+    const invitedTo = await orgs.findInvitation(tx, organizationPublicId, userId);
+    if (invitedTo === null) throw AppError.notFound('Invitation not found');
+    await assertSeatAvailable(tx, invitedTo);
+    return orgs.acceptInvitation(tx, organizationPublicId, userId);
+  });
   if (organizationId === null) throw AppError.notFound('Invitation not found');
   await recordAuditEvent({
     organizationId,

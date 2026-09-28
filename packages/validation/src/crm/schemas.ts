@@ -303,7 +303,16 @@ export const endCallSchema = z.object({
 
 // ---------------------------------------------------------------- lead messages
 export const MESSAGE_CHANNELS = ['sms', 'whatsapp'] as const;
+/** Statuses a member may set manually (PATCH /messages/:id/status). */
 export const MESSAGE_STATUSES = ['Sent', 'Delivered', 'Failed'] as const;
+/** Full delivery lifecycle as reported by the API. */
+export const MESSAGE_DELIVERY_STATUSES = [
+  'Queued',
+  'Sending',
+  'Sent',
+  'Delivered',
+  'Failed',
+] as const;
 
 const channel = z.enum(MESSAGE_CHANNELS, { error: 'Channel must be either "whatsapp" or "sms"' });
 const messageContent = z
@@ -356,6 +365,9 @@ export const sendChatMessageSchema = z.object({
     .min(1, 'Message content is required')
     .max(10_000),
   message_type: z.enum(['text', 'image', 'file']).default('text'),
+  /** Uploaded file (POST /files/chat-attachments). Its URL and type come from the file record. */
+  file_id: z.uuid().optional(),
+  /** Compatibility for older clients; prefer file_id. */
   attachment_url: nullableText(2_000).optional(),
   file_type: nullableText(100).optional(),
 });

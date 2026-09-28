@@ -1,5 +1,5 @@
 import { withTransaction } from '@crm/database';
-import email from '../../integrations/email.js';
+import { emailSender } from '../../platform/providers.js';
 import { recordAuditEvent } from '../../platform/audit.js';
 import { pool } from '../../platform/db.js';
 import type { Actor } from '../../platform/tenancy.js';
@@ -27,7 +27,15 @@ export async function updateSettings(
 }
 
 /** SMTP diagnostics for organization administrators: outcome only, never error details. */
-export const verifyEmailConfiguration = () => email.verifyEmailConfig();
+export const verifyEmailConfiguration = () => emailSender.verify();
 
-export const sendTestEmail = (actor: Actor, to: string | undefined) =>
-  email.sendTestEmail(to ?? actor.email);
+export const sendTestEmail = (actor: Actor, to: string | undefined): Promise<boolean> =>
+  emailSender
+    .send({
+      to: to ?? actor.email,
+      subject: 'Test Email',
+      text: 'This is a test email from the CRM system. If you receive it, email delivery works.',
+      html: '<p>This is a test email from the CRM system.</p><p>If you receive it, email delivery works.</p>',
+    })
+    .then(() => true)
+    .catch(() => false);

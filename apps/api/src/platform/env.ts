@@ -42,6 +42,8 @@ const apiEnvSchema = z
 
     FRONTEND_URL: optional,
 
+    /** 'memory' keeps uploads in process (development/tests only; refused in production). */
+    STORAGE_PROVIDER: z.enum(['imagekit', 'memory']).default('imagekit'),
     IMAGEKIT_PUBLIC_KEY: z.string(),
     IMAGEKIT_PRIVATE_KEY: z.string(),
     IMAGEKIT_URL_ENDPOINT: z.string(),
@@ -62,6 +64,13 @@ const apiEnvSchema = z
     GOLD_API_KEY: optional,
   })
   .superRefine((env, ctx) => {
+    if (env.NODE_ENV === 'production' && env.STORAGE_PROVIDER === 'memory') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['STORAGE_PROVIDER'],
+        message: 'In-memory storage is for development and tests only',
+      });
+    }
     if (env.AUTH_COOKIE_SAMESITE === 'none' && env.AUTH_COOKIE_SECURE === false) {
       ctx.addIssue({
         code: 'custom',

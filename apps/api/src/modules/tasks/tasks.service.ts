@@ -1,8 +1,10 @@
+import { withTransaction } from '@crm/database';
 import type { CalendarEvent, Task } from '@crm/types';
 import type { createTaskSchema, updateTaskSchema } from '@crm/validation';
 import type { z } from 'zod';
 import { recordAuditEvent } from '../../platform/audit.js';
 import { pool } from '../../platform/db.js';
+import { emit } from '../../platform/events.js';
 import { AppError } from '../../platform/http/errors.js';
 import { assertMember, ownerFilter, type Actor } from '../../platform/tenancy.js';
 import * as tasks from './tasks.repository.js';
@@ -86,7 +88,23 @@ export async function createTask(
     input.assigned_to,
     options.defaultToSelf ?? false,
   );
-  const id = await tasks.insert(pool, actor, { ...input, assigned_to: assignee }, actor.userId);
+  const id = await withTransaction(pool, async (tx) => {
+    const created = await tasks.insert(
+      tx,
+      actor,
+      { ...input, assigned_to: assignee },
+      actor.userId,
+    );
+    const task = (await tasks.findById(tx, actor, created))!;
+    if (assignee !== null) {
+      await emit(tx, actor, 'task.assigned', created, {
+        taskId: created,
+        assignedTo: assignee,
+        dueDate: new Date(task.due_date).toISOString(),
+      });
+    }
+    return created;
+  });
   const task = (await tasks.findById(pool, actor, id))!;
   if (options.audit !== false) {
     await recordAuditEvent({
@@ -106,13 +124,26 @@ export async function updateTask(
   options: { noun?: Noun; audit?: boolean } = {},
 ): Promise<Task> {
   const noun = options.noun ?? 'task';
-  await loadScoped(actor, id, 'crm.tasks.update', noun);
+  const before = await loadScoped(actor, id, 'crm.tasks.update', noun);
   const next = { ...patch };
   if (patch.assigned_to !== undefined) {
     next.assigned_to = await resolveAssignee(actor, 'crm.tasks.update', patch.assigned_to, false);
   }
-  await tasks.update(pool, actor, id, next);
-  const task = (await tasks.findById(pool, actor, id))!;
+  const task = await withTransaction(pool, async (tx) => {
+    await tasks.update(tx, actor, id, next);
+    const after = (await tasks.findById(tx, actor, id))!;
+    if (after.assigned_to !== null && after.assigned_to !== before.assigned_to) {
+      await emit(tx, actor, 'task.assigned', id, {
+        taskId: id,
+        assignedTo: after.assigned_to,
+        dueDate: new Date(after.due_date).toISOString(),
+      });
+    }
+    if (after.status === 'completed' && before.status !== 'completed') {
+      await emit(tx, actor, 'task.completed', id, { taskId: id, assignedTo: after.assigned_to });
+    }
+    return after;
+  });
   if (options.audit !== false) {
     await recordAuditEvent({
       action: 'UPDATE_TASK',

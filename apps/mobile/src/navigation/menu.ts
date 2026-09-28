@@ -21,6 +21,7 @@ export const MENU: MenuGroup[] = [
     label: 'Work',
     items: [
       { route: 'Home', label: 'Home', icon: 'home' },
+      { route: 'Notifications', label: 'Notifications', icon: 'bell' },
       { route: 'Tasks', label: 'Tasks', icon: 'check-square', anyOf: ['crm.tasks.read'] },
       { route: 'Calendar', label: 'Calendar', icon: 'calendar', anyOf: ['crm.tasks.read'] },
       { route: 'Followups', label: 'Follow-ups', icon: 'clock', anyOf: ['crm.followups.read'] },

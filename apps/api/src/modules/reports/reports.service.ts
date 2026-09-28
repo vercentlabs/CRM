@@ -1,4 +1,5 @@
 import { pool } from '../../platform/db.js';
+import { requireFeature } from '../../platform/entitlements.js';
 import { AppError } from '../../platform/http/errors.js';
 import { ownerFilter, type Actor } from '../../platform/tenancy.js';
 import * as reports from './reports.repository.js';
@@ -66,7 +67,12 @@ export function csvCell(value: unknown): string {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+/**
+ * Synchronous CSV export (bounded by the organization's lead count). Large
+ * exports would move to a worker job; none is needed at current volumes.
+ */
 export async function leadsCsv(actor: Actor): Promise<string> {
+  await requireFeature(actor, 'reports.export');
   const leads = await reports.leadsForExport(pool, actor, ownerFilter(actor, 'crm.reports.export'));
   if (leads.length === 0) throw AppError.notFound('No leads found');
   const exportDate = new Date().toISOString().split('T')[0];

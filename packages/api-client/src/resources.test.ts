@@ -11,6 +11,35 @@ function jsonResponse(status: number, body: unknown) {
 type Call = [string, RequestInit & { headers: Record<string, string> }];
 
 describe('v1 resources', () => {
+  it('exposes notifications, entitlements and file deletion under /api/v1', async () => {
+    const pagination = { page: 1, limit: 20, total: 0, totalPages: 1 };
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, { success: true, data: [], meta: { pagination } }),
+    );
+    const client = createApiClient({
+      baseUrl: 'http://api.test',
+      getToken: () => 't',
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    await client.v1.notifications.list({ unread: true });
+    await client.v1.notifications.unreadCount();
+    await client.v1.notifications.markRead('a b');
+    await client.v1.notifications.markAllRead();
+    await client.v1.organizations.entitlements();
+    await client.v1.files.remove('f-1');
+    const calls = (fetchMock.mock.calls as unknown as Call[]).map(
+      ([url, init]) => `${init.method} ${url}`,
+    );
+    expect(calls).toEqual([
+      'GET http://api.test/api/v1/notifications?unread=true',
+      'GET http://api.test/api/v1/notifications/unread-count',
+      'POST http://api.test/api/v1/notifications/a%20b/read',
+      'POST http://api.test/api/v1/notifications/read-all',
+      'GET http://api.test/api/v1/organization/entitlements',
+      'DELETE http://api.test/api/v1/files/f-1',
+    ]);
+  });
+
   it('uses cookies and CSRF in web mode (unsafe methods only)', async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { success: true, data: { id: 7 } }));
     const client = createApiClient({

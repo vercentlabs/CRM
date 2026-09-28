@@ -19,7 +19,7 @@ The workspace uses pnpm with the isolated linker and Turborepo. Root commands ar
 ```
 web, mobile ─► api-client ─► types
 web, mobile, api ─► validation, permissions, types
-api, worker ─► database, config, (events, observability)
+api, worker ─► database, config, events, entitlements, integrations, (observability)
 database ─► (pg only)
 ```
 
@@ -72,13 +72,15 @@ Expo, native UI and navigation only (implemented in Phase 5, see `MOBILE.md`). I
 
 ## Worker, jobs and events
 
-- `apps/worker` runs the same code packages as the API, but no HTTP.
-- Phase 6 adds Redis and BullMQ (only when Redis is provisioned) for email, SMS, report exports, reminders and webhooks. Jobs are idempotent and keyed by name.
-- Events: `packages/events` defines typed domain events (`lead.created`, …). They are written to an outbox table in the same transaction and dispatched by the worker, so there is no broker.
+Implemented in Phase 6; details in `RUNTIME_PLATFORM.md`.
+
+- `apps/worker` uses the same packages as the API and serves no business HTTP (only an optional health endpoint).
+- Events (`packages/events`, typed and versioned) are written to `outbox_events` in the same transaction as the change. The worker relays them (SKIP LOCKED leases) to BullMQ queues (`communications`, `notifications`, `webhooks`, `maintenance`) for email, SMS, notifications, reminders, provider cleanup and signed outbound webhooks. Jobs are idempotent; Redis never holds business state.
+- Plans and entitlements (`packages/entitlements`) are data, resolved server-side and separate from permissions.
 
 ## Files
 
-Uploads go through the API (size and type validated), are stored in ImageKit or S3-compatible storage, and are recorded in a `files` table scoped by `organization_id`. Clients receive short-lived URLs, never provider credentials.
+Uploads go through the API (size, allowlisted type and magic bytes validated), are stored through the `FileStorage` interface (ImageKit today; S3-compatible later) and recorded in the `files` table scoped by `organization_id` (Phase 6). Deletion is metadata-first; the worker removes provider objects. Clients never receive provider credentials. Short-lived signed URLs are a later hardening step.
 
 ## Observability
 

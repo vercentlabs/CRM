@@ -35,12 +35,15 @@ This package handles PostgreSQL access for the API, the worker and tooling. Clie
 
 ## Shipped migrations
 
-| File                             | Purpose                                                                                                                               |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `0001_baseline_schema.sql`       | Pre-Phase-1 schema snapshot (unchanged)                                                                                               |
-| `0002_saas_identity.sql`         | Organizations, org-aware roles, permissions, role_permissions, memberships, sessions, and hashed refresh tokens                       |
-| `0003_tenant_ownership.sql`      | `organization_id` on business tables, backfill into one legacy organization, NOT NULL, per-org uniques, composite FKs and indexes     |
-| `0004_remove_legacy_role_id.sql` | Drops the legacy numeric role ids `users.role_id` and `roles.legacy_role_id` (roles are per membership; built-in role ids 1/2/3 stay) |
+| File                                     | Purpose                                                                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `0001_baseline_schema.sql`               | Pre-Phase-1 schema snapshot (unchanged)                                                                                               |
+| `0002_saas_identity.sql`                 | Organizations, org-aware roles, permissions, role_permissions, memberships, sessions, and hashed refresh tokens                       |
+| `0003_tenant_ownership.sql`              | `organization_id` on business tables, backfill into one legacy organization, NOT NULL, per-org uniques, composite FKs and indexes     |
+| `0004_remove_legacy_role_id.sql`         | Drops the legacy numeric role ids `users.role_id` and `roles.legacy_role_id` (roles are per membership; built-in role ids 1/2/3 stay) |
+| `0005_outbox_notifications_delivery.sql` | Transactional outbox, notifications, message delivery lifecycle, email deliveries, worker-generated reset tokens, reminder indexes    |
+| `0006_files_webhooks.sql`                | File metadata/lifecycle, outbound webhook endpoints and deliveries                                                                    |
+| `0007_plans_entitlements.sql`            | Plans, entitlements, subscriptions (default plan for every organization), usage counters                                              |
 
 Tenancy rules are in `docs/architecture/TENANCY_AND_AUTH.md`. A fresh database has no organization: run `pnpm org:bootstrap` (env: `BOOTSTRAP_ORG_NAME`, `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD`).
 

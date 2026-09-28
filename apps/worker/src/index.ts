@@ -1,18 +1,19 @@
 import 'dotenv/config';
 import { loadWorkerEnv } from './env.js';
+import { errorInfo, jsonLogger } from './logger.js';
+import { createRuntime } from './runtime.js';
 import { createWorker } from './worker.js';
 
 const env = loadWorkerEnv();
-const worker = createWorker({
-  heartbeatSeconds: env.WORKER_HEARTBEAT_SECONDS,
-  queueUrl: env.REDIS_URL,
-});
+const { deps, options } = createRuntime(env);
+const worker = createWorker(deps, options);
 
 let stopping = false;
 async function shutdown(signal: string, exitCode = 0): Promise<void> {
   if (stopping) return;
   stopping = true;
-  const forceExit = setTimeout(() => process.exit(1), 10_000);
+  // Hard stop if graceful shutdown overruns the platform's grace period.
+  const forceExit = setTimeout(() => process.exit(1), options.shutdownTimeoutMs + 5_000);
   forceExit.unref();
   await worker.stop(signal);
   process.exit(exitCode);
@@ -21,8 +22,13 @@ async function shutdown(signal: string, exitCode = 0): Promise<void> {
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('unhandledRejection', (reason) => {
-  console.error('[worker] unhandled rejection', reason);
+  jsonLogger.error('unhandled_rejection', errorInfo(reason));
   void shutdown('unhandledRejection', 1);
 });
 
-await worker.start();
+try {
+  await worker.start();
+} catch (error) {
+  jsonLogger.error('worker_start_failed', errorInfo(error));
+  await shutdown('startup failure', 1);
+}

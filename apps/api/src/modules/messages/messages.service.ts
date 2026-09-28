@@ -3,16 +3,20 @@ import type { LeadMessage } from '@crm/types';
 import type { bulkMessageSchema, sendMessageSchema } from '@crm/validation';
 import type { z } from 'zod';
 import { pool } from '../../platform/db.js';
+import { requireFeature } from '../../platform/entitlements.js';
+import { emit } from '../../platform/events.js';
 import { AppError } from '../../platform/http/errors.js';
 import { ownerFilter, type Actor } from '../../platform/tenancy.js';
 import * as leads from '../leads/leads.repository.js';
 import * as messages from './messages.repository.js';
 
 /**
- * Lead messaging. Messages are recorded with status 'Sent'; there is no
- * provider dispatch yet ("message requested" is a Phase 6 event candidate).
- * API channels are lowercase; the messages_type_check constraint stores
- * 'SMS' / 'WhatsApp'.
+ * Lead messaging. A send request stores the message as 'Queued' and emits
+ * `message.requested` in the same transaction; the worker then calls the
+ * provider and moves it to Sent / Failed (and Delivered from the provider's
+ * callback). The API never reports a message as sent before the provider
+ * accepted it. API channels are lowercase; the messages_type_check constraint
+ * stores 'SMS' / 'WhatsApp'.
  */
 const CHANNEL_TO_TYPE = { sms: 'SMS', whatsapp: 'WhatsApp' } as const;
 
@@ -42,11 +46,19 @@ export async function sendMessage(
   );
   // Same answer for "missing", "other organization" and "not yours".
   if (!leadId) throw AppError.notFound('Lead not found');
-  const id = await messages.insert(pool, actor, {
-    lead_id: leadId,
-    user_id: actor.userId,
-    message_type: CHANNEL_TO_TYPE[input.channel],
-    content: input.content,
+  const id = await withTransaction(pool, async (tx) => {
+    const created = await messages.insert(tx, actor, {
+      lead_id: leadId,
+      user_id: actor.userId,
+      message_type: CHANNEL_TO_TYPE[input.channel],
+      content: input.content,
+    });
+    await emit(tx, actor, 'message.requested', created, {
+      messageId: created,
+      leadId,
+      channel: input.channel,
+    });
+    return created;
   });
   return (await messages.findById(pool, actor, id))!;
 }
@@ -56,6 +68,7 @@ export async function sendBulk(
   actor: Actor,
   input: z.output<typeof bulkMessageSchema>,
 ): Promise<{ count: number; ids: number[] }> {
+  await requireFeature(actor, 'messages.bulk');
   const requested = [...new Set(input.lead_ids)];
   const visible = await leads.visibleIds(
     pool,
@@ -68,18 +81,48 @@ export async function sendBulk(
   const ids = await withTransaction(pool, async (client) => {
     const created: number[] = [];
     for (const leadId of visible) {
-      created.push(
-        await messages.insert(client, actor, {
-          lead_id: leadId,
-          user_id: actor.userId,
-          message_type: CHANNEL_TO_TYPE[input.channel],
-          content: input.content,
-        }),
-      );
+      const messageId = await messages.insert(client, actor, {
+        lead_id: leadId,
+        user_id: actor.userId,
+        message_type: CHANNEL_TO_TYPE[input.channel],
+        content: input.content,
+      });
+      await emit(client, actor, 'message.requested', messageId, {
+        messageId,
+        leadId,
+        channel: input.channel,
+      });
+      created.push(messageId);
     }
     return created;
   });
   return { count: ids.length, ids };
+}
+
+/** Plivo SMS delivery report (signature already verified by the webhook router). */
+export async function onProviderStatus(report: {
+  messageUuid: string | undefined;
+  status: string | undefined;
+  errorCode: string | undefined;
+}): Promise<void> {
+  if (!report.messageUuid || !report.status) return;
+  const status = report.status.toLowerCase();
+  const outcome =
+    status === 'delivered'
+      ? 'delivered'
+      : ['failed', 'undelivered', 'rejected'].includes(status)
+        ? 'failed'
+        : null;
+  if (!outcome) return; // queued / sent: nothing new to record
+  await messages.applyProviderReport(pool, {
+    provider: 'plivo',
+    providerMessageId: report.messageUuid,
+    outcome,
+    failureCode:
+      outcome === 'failed'
+        ? `PROVIDER_${(report.errorCode ?? 'UNDELIVERED').replace(/[^A-Za-z0-9_]/g, '').slice(0, 30)}`
+        : null,
+  });
 }
 
 export async function updateStatus(actor: Actor, id: number, status: string): Promise<LeadMessage> {

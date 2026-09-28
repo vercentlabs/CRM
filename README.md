@@ -7,14 +7,16 @@ apps/
   api/       Express REST API (/api/v1)
   web/       Next.js web app (TypeScript, /api/v1 via @crm/api-client)
   mobile/    Expo / React Native app (TypeScript, /api/v1 via @crm/api-client)
-  worker/    Background worker (foundation)
+  worker/    Background worker: outbox relay, BullMQ jobs, reminders
 packages/
   config/       TS configs + env validation      types/        client-safe API contracts
   validation/   shared zod schemas               api-client/   shared fetch client
   permissions/  permissions, roles, scope checks  database/     pg pool, health, migrations
+  events/       typed domain events + outbox       entitlements/ plan features and limits
+  integrations/ storage, email, SMS adapters; webhook signing
   ui/           web design system (tokens + accessible React primitives)
-infrastructure/docker/   api / web / worker Dockerfiles (build from repo root)
-docs/architecture/       CURRENT_SYSTEM, TARGET_SYSTEM, API, WEB, MOBILE, TENANCY_AND_AUTH, GUARDRAILS, MIGRATION_TRACKER
+infrastructure/docker/   api / web / worker Dockerfiles (build from repo root), dev compose (Postgres + Redis)
+docs/architecture/       CURRENT_SYSTEM, TARGET_SYSTEM, API, WEB, MOBILE, RUNTIME_PLATFORM, TENANCY_AND_AUTH, GUARDRAILS, MIGRATION_TRACKER
 ```
 
 ## Getting started
@@ -30,6 +32,8 @@ pnpm db:migrate            # existing DB created before Phase 1? run `pnpm db:mi
 BOOTSTRAP_ORG_NAME="Acme" BOOTSTRAP_ADMIN_EMAIL=you@acme.test BOOTSTRAP_ADMIN_PASSWORD="<12+ chars>" pnpm org:bootstrap
 pnpm dev                   # api + web
 pnpm dev:mobile            # Expo dev server
+pnpm dev:infra             # local PostgreSQL + Redis (Docker)
+pnpm worker:dev            # background worker (inline queue without REDIS_URL)
 ```
 
 | Command                                                         | What it does                                                    |

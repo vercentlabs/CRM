@@ -5,6 +5,7 @@ import type { z } from 'zod';
 import { pool } from '../../platform/db.js';
 import { AppError } from '../../platform/http/errors.js';
 import { filterActiveMembers, type Actor } from '../../platform/tenancy.js';
+import { attachToChatMessage } from '../files/files.service.js';
 import * as chat from './chat.repository.js';
 
 /**
@@ -74,13 +75,28 @@ export async function sendMessage(
   input: z.output<typeof sendChatMessageSchema>,
 ) {
   const id = await requireConversation(actor, conversationId);
-  const messageId = await chat.insertMessage(pool, {
-    conversationId: id,
-    senderId: actor.userId,
-    content: input.content,
-    messageType: input.message_type,
-    attachmentUrl: input.attachment_url ?? null,
-    fileType: input.file_type ?? null,
+  const messageId = await withTransaction(pool, async (tx) => {
+    if (input.file_id) {
+      const { file, attach } = await attachToChatMessage(tx, actor, input.file_id);
+      const created = await chat.insertMessage(tx, {
+        conversationId: id,
+        senderId: actor.userId,
+        content: input.content,
+        messageType: file.mime_type.startsWith('image/') ? 'image' : 'file',
+        attachmentUrl: file.url,
+        fileType: file.mime_type,
+      });
+      await attach(created);
+      return created;
+    }
+    return chat.insertMessage(tx, {
+      conversationId: id,
+      senderId: actor.userId,
+      content: input.content,
+      messageType: input.message_type,
+      attachmentUrl: input.attachment_url ?? null,
+      fileType: input.file_type ?? null,
+    });
   });
   await chat.touchLastRead(pool, id, actor.userId);
   return (await chat.findMessage(pool, actor, messageId))!;

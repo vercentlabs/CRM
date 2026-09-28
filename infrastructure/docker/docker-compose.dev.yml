@@ -1,0 +1,42 @@
+# Local development infrastructure only (PostgreSQL + Redis). The API, web and
+# worker keep running on the host (`pnpm dev`, `pnpm worker:dev`).
+#
+#   pnpm dev:infra        # start
+#   docker compose -f infrastructure/docker/docker-compose.dev.yml down
+#
+# Ports and credentials are overridable through the environment; the defaults
+# are development-only values, never used in production.
+name: crm-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${CRM_DEV_DB_USER:-crm}
+      POSTGRES_PASSWORD: ${CRM_DEV_DB_PASSWORD:-crm_dev_password}
+      POSTGRES_DB: ${CRM_DEV_DB_NAME:-crm}
+    ports:
+      - '127.0.0.1:${CRM_DEV_DB_PORT:-5432}:5432'
+    volumes:
+      - crm-dev-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    # Queues need durability across restarts: append-only file, and no key eviction.
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    ports:
+      - '127.0.0.1:${CRM_DEV_REDIS_PORT:-6379}:6379'
+    volumes:
+      - crm-dev-redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      retries: 10
+
+volumes:
+  crm-dev-postgres:
+  crm-dev-redis:

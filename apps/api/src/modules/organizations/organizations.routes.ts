@@ -1,3 +1,4 @@
+import { FEATURE_KEYS, LIMIT_KEYS } from '@crm/entitlements';
 import { createMemberSchema, updateMemberSchema, updateProfileSchema } from '@crm/validation';
 import { z } from 'zod';
 import { offsetOf, pageQuery } from '../../platform/http/query.js';
@@ -90,6 +91,18 @@ const updateProfile = controller({
     ok(await service.updateProfile(actorFrom(auth), params.userId, body)),
 });
 
+const entitlements = controller({
+  handle: async ({ auth }) => ok(await service.organizationEntitlements(actorFrom(auth))),
+});
+
+const entitlementsSchema = z.object({
+  plan: z.object({ key: z.string(), name: z.string() }),
+  subscriptionStatus: z.string(),
+  features: z.object(Object.fromEntries(FEATURE_KEYS.map((k) => [k, z.boolean()]))),
+  limits: z.object(Object.fromEntries(LIMIT_KEYS.map((k) => [k, z.number().nullable()]))),
+  usage: z.object({ seats: z.number(), 'storage.bytes': z.number() }),
+});
+
 const tags = ['Organizations'];
 
 export const organizationsModule: ApiModule = {
@@ -127,6 +140,14 @@ export const organizationsModule: ApiModule = {
       response: organizationSummary.extend({
         membership: z.object({ id: z.number(), role: roleSummary }),
       }),
+    },
+    {
+      method: 'get',
+      path: '/organization/entitlements',
+      summary: "What the organization's plan enables (features, limits) and current usage",
+      tags,
+      controller: entitlements,
+      response: entitlementsSchema,
     },
     {
       method: 'get',

@@ -493,7 +493,24 @@ describe.skipIf(!hasTestDatabase)('/api/v1 modules', () => {
         content: 'Hi',
       });
       expect(sent.status).toBe(201);
-      expect(sent.body.data).toMatchObject({ message_type: 'WhatsApp', status: 'Sent' });
+      // Accepted, not yet sent: the worker calls the provider (see apps/worker tests).
+      expect(sent.body.data).toMatchObject({
+        message_type: 'WhatsApp',
+        status: 'Queued',
+        sent_at: null,
+      });
+      const event = await db.pool.query(
+        `SELECT organization_id, event_type, payload FROM outbox_events
+         WHERE event_type = 'message.requested' AND aggregate_id = $1`,
+        [String(sent.body.data.id)],
+      );
+      expect(event.rows).toEqual([
+        {
+          organization_id: fx.orgA.id,
+          event_type: 'message.requested',
+          payload: { messageId: sent.body.data.id, leadId: fx.records.leadA1, channel: 'whatsapp' },
+        },
+      ]);
       expectError(
         await as('aSales', 'POST', '/messages', {
           lead_id: fx.records.leadA2,

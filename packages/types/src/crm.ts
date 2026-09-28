@@ -310,3 +310,37 @@ export interface ApiMetadata {
   version: string;
   openapi: string;
 }
+
+/** `GET /reports/dashboard-summary` (own scope: my records). */
+export interface DashboardSummary {
+  totalLeads: number;
+  leadsByStatus: { status: LeadStatus; count: number }[];
+  pendingFollowups: number;
+  overdueFollowups: number;
+  callsToday: number;
+  messagesToday: number;
+}
+
+/** `GET /reports/sales-performance` row (active non-admin members). */
+export interface SalesPerformanceRow {
+  id: number;
+  name: string;
+  email: string;
+  totalLeads: number;
+  convertedLeads: number;
+  /** Percentage, two decimals. */
+  conversionRate: number;
+}
+
+/** `GET /reports/lead-aging`: leads by age since creation. */
+export type LeadAgingReport = Record<'0-1_days' | '2-3_days' | '4-7_days' | '7+_days', number>;
+
+/** `GET /reports/conversion`: lead counts by status. */
+export type ConversionReport = Partial<Record<LeadStatus, number>>;
+
+export interface LeadsOverTimePoint {
+  time: string;
+  leads: number;
+}
+
+export type ReportPeriod = 'today' | 'week' | 'month';

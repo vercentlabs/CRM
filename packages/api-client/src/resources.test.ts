@@ -90,3 +90,59 @@ describe('v1 resources', () => {
     });
   });
 });
+
+describe('session refresh', () => {
+  const unauthorized = () =>
+    jsonResponse(401, { success: false, error: { code: 'UNAUTHENTICATED', message: 'Expired' } });
+
+  it('refreshes once for concurrent 401s and retries each request', async () => {
+    let authed = false;
+    const fetchMock = vi.fn(async () =>
+      authed ? jsonResponse(200, { success: true, data: { ok: true } }) : unauthorized(),
+    );
+    const refreshSession = vi.fn(async () => {
+      authed = true;
+      return true;
+    });
+    const client = createApiClient({
+      baseUrl: 'http://api.test',
+      fetch: fetchMock as unknown as typeof fetch,
+      refreshSession,
+    });
+
+    await Promise.all([client.v1.auth.session(), client.v1.leads.get(1)]);
+
+    expect(refreshSession).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('gives up when the refresh fails and never refreshes anonymous calls', async () => {
+    const fetchMock = vi.fn(async () => unauthorized());
+    const onUnauthorized = vi.fn();
+    const refreshSession = vi.fn(async () => false);
+    const client = createApiClient({
+      baseUrl: 'http://api.test',
+      fetch: fetchMock as unknown as typeof fetch,
+      refreshSession,
+      onUnauthorized,
+    });
+
+    await expect(client.v1.leads.get(1)).rejects.toMatchObject({ status: 401 });
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+    await expect(client.v1.auth.login({ email: 'a@b.co', password: 'x' })).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(refreshSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('downloads non-envelope bodies (CSV) as text', async () => {
+    const fetchMock = vi.fn(
+      async () => new Response('id,name\n1,A', { headers: { 'content-type': 'text/csv' } }),
+    );
+    const client = createApiClient({
+      baseUrl: 'http://api.test',
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    expect(await client.v1.reports.leadsCsv()).toBe('id,name\n1,A');
+  });
+});

@@ -3,6 +3,12 @@ import type {
   AuditLogEntry,
   AuthSessionView,
   CalendarEvent,
+  ConversionReport,
+  DashboardSummary,
+  LeadAgingReport,
+  LeadsOverTimePoint,
+  ReportPeriod,
+  SalesPerformanceRow,
   Call,
   ChatMessage,
   ChatParticipant,
@@ -281,14 +287,20 @@ export function createResources(t: V1Transport) {
       checkIn: (body: CheckInInput) => put<unknown>('/locations/me', body),
     },
     reports: {
-      dashboardSummary: () => get<unknown>('/reports/dashboard-summary'),
+      dashboardSummary: () => get<DashboardSummary>('/reports/dashboard-summary'),
       salesPerformance: (query?: { days?: number; user_id?: number }) =>
-        get<unknown>('/reports/sales-performance', query),
-      leadAging: () => get<unknown>('/reports/lead-aging'),
+        get<SalesPerformanceRow[]>('/reports/sales-performance', query),
+      leadAging: () => get<LeadAgingReport>('/reports/lead-aging'),
       conversion: (query?: { days?: number; user_id?: number }) =>
-        get<unknown>('/reports/conversion', query),
-      leadsOverTime: (query?: { period?: 'today' | 'week' | 'month' }) =>
-        get<unknown>('/reports/leads-over-time', query),
+        get<ConversionReport>('/reports/conversion', query),
+      leadsOverTime: (query?: { period?: ReportPeriod }) =>
+        get<LeadsOverTimePoint[]>('/reports/leads-over-time', query),
+      /** CSV text of my (own scope) or the organization's leads. */
+      leadsCsv: () =>
+        t.raw<string>('GET', '/reports/leads-export', {
+          headers: { Accept: 'text/csv' },
+          timeoutMs: 60_000,
+        }),
     },
     settings: {
       get: () => get<Record<string, string>>('/settings'),

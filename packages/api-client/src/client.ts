@@ -29,6 +29,12 @@ export interface ApiClientOptions {
   getCsrfToken?: () => MaybePromise<string | null | undefined>;
   /** Called once per 401 response, before the error is thrown. */
   onUnauthorized?: (error: ApiClientError) => void;
+  /**
+   * Renews the session after a 401 (cookie refresh on web, token rotation on
+   * mobile). Concurrent 401s share one call; the failed request is retried
+   * once when it resolves `true`. Never called for anonymous requests.
+   */
+  refreshSession?: () => Promise<boolean>;
   /** Defaults to 10s, matching the existing web and mobile clients. */
   timeoutMs?: number;
   /** Override for tests or non-standard runtimes. */
@@ -44,7 +50,7 @@ export interface RequestOptions {
   headers?: Record<string, string>;
   signal?: AbortSignal;
   timeoutMs?: number;
-  /** Skip the Authorization header (e.g. login, health). */
+  /** Skip the Authorization header and session refresh (e.g. login, health). */
   anonymous?: boolean;
 }
 
@@ -61,6 +67,8 @@ export interface V1Result<T> {
 /** Transport for `/api/v1` routes: unwraps the success envelope. */
 export interface V1Transport {
   request<T>(method: HttpMethod, path: string, options?: RequestOptions): Promise<V1Result<T>>;
+  /** A v1 route whose success body is not the JSON envelope (e.g. CSV downloads). */
+  raw<T = unknown>(method: HttpMethod, path: string, options?: RequestOptions): Promise<T>;
 }
 
 export function defaultRequestId(): string {
@@ -134,11 +142,41 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
   const resolveBaseUrl = async () =>
     typeof options.baseUrl === 'function' ? options.baseUrl() : options.baseUrl;
 
+  let refreshing: Promise<boolean> | null = null;
+  const refreshOnce = () => {
+    if (!options.refreshSession) return Promise.resolve(false);
+    refreshing ??= options
+      .refreshSession()
+      .catch(() => false)
+      .finally(() => {
+        refreshing = null;
+      });
+    return refreshing;
+  };
+
   async function request<T>(
     method: HttpMethod,
     path: string,
     init: RequestOptions = {},
   ): Promise<T> {
+    try {
+      return await send<T>(method, path, init);
+    } catch (error) {
+      const retryable =
+        error instanceof ApiClientError &&
+        error.isUnauthenticated &&
+        !init.anonymous &&
+        options.refreshSession;
+      if (!retryable || !(await refreshOnce())) {
+        if (error instanceof ApiClientError && error.isUnauthenticated)
+          options.onUnauthorized?.(error);
+        throw error;
+      }
+      return send<T>(method, path, init);
+    }
+  }
+
+  async function send<T>(method: HttpMethod, path: string, init: RequestOptions = {}): Promise<T> {
     const requestId = generateRequestId();
     const headers: Record<string, string> = {
       Accept: 'application/json',
@@ -210,7 +248,6 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         parsed,
         response.headers.get(REQUEST_ID_HEADER) ?? requestId,
       );
-      if (error.isUnauthenticated) options.onUnauthorized?.(error);
       throw error;
     }
     return parsed as T;
@@ -220,6 +257,9 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     async request<T>(method: HttpMethod, path: string, init?: RequestOptions) {
       const envelope = await request<ApiSuccess<T>>(method, `${API_V1_PREFIX}${path}`, init);
       return envelope.meta ? { data: envelope.data, meta: envelope.meta } : { data: envelope.data };
+    },
+    raw<T>(method: HttpMethod, path: string, init?: RequestOptions) {
+      return request<T>(method, `${API_V1_PREFIX}${path}`, init);
     },
   };
 

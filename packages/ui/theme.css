@@ -1,0 +1,95 @@
+/*
+ * CRM design tokens. Import once from the app stylesheet after
+ * `@import "tailwindcss"`; components use the generated utilities
+ * (bg-surface, text-fg, border-border, text-muted, bg-primary, …).
+ * Light is the default; `[data-theme='dark']` on <html> switches palettes.
+ */
+
+:root {
+  --crm-bg: #f6f7f9;
+  --crm-surface: #ffffff;
+  --crm-surface-muted: #f1f3f6;
+  --crm-fg: #111827;
+  --crm-muted: #5b6474;
+  --crm-border: #e1e5eb;
+  --crm-border-strong: #c9d0da;
+  --crm-primary: #2f54d9;
+  --crm-primary-hover: #2645b7;
+  --crm-primary-fg: #ffffff;
+  --crm-primary-soft: #e8edfd;
+  --crm-danger: #c62828;
+  --crm-danger-soft: #fdecec;
+  --crm-success: #1b7a45;
+  --crm-success-soft: #e6f4ec;
+  --crm-warning: #9a5b00;
+  --crm-warning-soft: #fdf3e2;
+  --crm-info: #1f5fa8;
+  --crm-info-soft: #e7f0fb;
+  --crm-ring: #2f54d9;
+  --crm-overlay: rgb(15 23 42 / 0.45);
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --crm-bg: #0e1116;
+  --crm-surface: #161a21;
+  --crm-surface-muted: #1d222b;
+  --crm-fg: #e6e9ef;
+  --crm-muted: #9aa3b2;
+  --crm-border: #2a303b;
+  --crm-border-strong: #3a4250;
+  --crm-primary: #6b8cff;
+  --crm-primary-hover: #87a1ff;
+  --crm-primary-fg: #0b1020;
+  --crm-primary-soft: #1d2a52;
+  --crm-danger: #ff7b72;
+  --crm-danger-soft: #3a1d1d;
+  --crm-success: #5cc98b;
+  --crm-success-soft: #173325;
+  --crm-warning: #f0b35a;
+  --crm-warning-soft: #3a2b12;
+  --crm-info: #79b0ff;
+  --crm-info-soft: #172a45;
+  --crm-ring: #87a1ff;
+  --crm-overlay: rgb(0 0 0 / 0.6);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--crm-bg);
+  --color-surface: var(--crm-surface);
+  --color-surface-muted: var(--crm-surface-muted);
+  --color-fg: var(--crm-fg);
+  --color-muted: var(--crm-muted);
+  --color-border: var(--crm-border);
+  --color-border-strong: var(--crm-border-strong);
+  --color-primary: var(--crm-primary);
+  --color-primary-hover: var(--crm-primary-hover);
+  --color-primary-fg: var(--crm-primary-fg);
+  --color-primary-soft: var(--crm-primary-soft);
+  --color-danger: var(--crm-danger);
+  --color-danger-soft: var(--crm-danger-soft);
+  --color-success: var(--crm-success);
+  --color-success-soft: var(--crm-success-soft);
+  --color-warning: var(--crm-warning);
+  --color-warning-soft: var(--crm-warning-soft);
+  --color-info: var(--crm-info);
+  --color-info-soft: var(--crm-info-soft);
+  --color-ring: var(--crm-ring);
+  --color-overlay: var(--crm-overlay);
+}
+
+@layer base {
+  html,
+  body {
+    background: var(--crm-bg);
+    color: var(--crm-fg);
+  }
+  :focus-visible {
+    outline: 2px solid var(--crm-ring);
+    outline-offset: 2px;
+  }
+  dialog::backdrop {
+    background: var(--crm-overlay);
+  }
+}

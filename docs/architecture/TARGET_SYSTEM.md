@@ -29,7 +29,7 @@ Clients never import `database`. `types` holds wire contracts only, never DB row
 
 - All new code is strict TypeScript (`@crm/config/tsconfig/{node,library}.json`).
 - The API is fully TypeScript since Phase 3 (no `allowJs`). It is built by `tsc` to `dist/`, and `tsx` is used in dev.
-- Web is JS today and moves to TS page-by-page when screens are rebuilt. Mobile is already TS.
+- Web is TypeScript since Phase 4. Mobile is already TS.
 
 ## API
 
@@ -65,7 +65,7 @@ Clients never import `database`. `types` holds wire contracts only, never DB row
 
 ## Web
 
-Next.js App Router, presentation only. It calls the API through `@crm/api-client` (a single client replacing the current three), uses shared zod schemas for forms, and has no DB access. Auth is an HttpOnly cookie session with a CSRF header (Phase 2); JavaScript never holds tokens.
+Next.js App Router, presentation only (implemented in Phase 4, see `WEB.md`). It calls the API through `@crm/api-client`, uses shared zod schemas for forms and `@crm/ui` for components, and has no DB access. Auth is an HttpOnly cookie session with a CSRF header (Phase 2); JavaScript never holds tokens.
 
 ## Mobile
 

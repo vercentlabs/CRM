@@ -1,0 +1,77 @@
+
+/* Fade-in animation for the login container */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s ease-out;
+}
+
+/* Override global label styling to use black color */
+label {
+  color: #000000 !important;
+}
+
+/* Override global input styles for blue theme - matching CreateLeadDrawer */
+input[type="email"],
+input[type="password"] {
+  background-color: #eff6ff !important; /* blue-50 */
+  border-color: #bfdbfe !important; /* blue-300 */
+  color: #111827 !important; /* gray-900 */
+  border-radius: 0.5rem !important;
+  padding: 0.75rem 1rem !important;
+}
+
+input[type="email"]:focus,
+input[type="password"]:focus {
+  border-color: #3b82f6 !important; /* blue-500 */
+  box-shadow: 0 0 0 2px #3b82f6 !important;
+  outline: none !important;
+}
+
+/* Button hover effect */
+button[type="submit"]:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+button[type="submit"]:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Login card styling */
+.login-card {
+  background: white;
+  border-radius: 1rem;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* Header gradient */
+.login-header {
+  background: linear-gradient(to right, #2563eb, #4f46e5);
+  border-radius: 1rem 1rem 0 0;
+}
+
+/* Mobile responsive styles */
+@media (max-width: 640px) {
+  .login-container {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .login-card {
+    border-radius: 0.75rem;
+  }
+
+  .login-header {
+    border-radius: 0.75rem 0.75rem 0 0;
+  }
+}

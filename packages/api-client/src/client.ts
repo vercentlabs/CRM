@@ -1,11 +1,13 @@
 import {
   API_V1_PREFIX,
   REQUEST_ID_HEADER,
+  type ApiMeta,
   type ApiSuccess,
   type HealthLiveData,
   type HealthReadyData,
 } from '@crm/types';
 import { ApiClientError, errorFromResponse } from './errors.js';
+import { createResources, type CrmResources } from './resources.js';
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -16,8 +18,15 @@ export type QueryValue = string | number | boolean | null | undefined;
 export interface ApiClientOptions {
   /** API origin, e.g. `https://api.example.com`. May be resolved lazily (mobile stores an override). */
   baseUrl: string | (() => MaybePromise<string>);
-  /** Returns the bearer token, if any. */
+  /** Bearer mode (mobile/API): returns the access token, if any. */
   getToken?: () => MaybePromise<string | null | undefined>;
+  /**
+   * Cookie mode (web): send the HttpOnly session cookies with every request
+   * (`'include'` for a separate API origin).
+   */
+  credentials?: RequestCredentials;
+  /** Cookie mode: CSRF token from the session payload, sent as `x-csrf-token` on unsafe methods. */
+  getCsrfToken?: () => MaybePromise<string | null | undefined>;
   /** Called once per 401 response, before the error is thrown. */
   onUnauthorized?: (error: ApiClientError) => void;
   /** Defaults to 10s, matching the existing web and mobile clients. */
@@ -40,6 +49,19 @@ export interface RequestOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const CSRF_HEADER = 'x-csrf-token';
+const UNSAFE_METHODS: ReadonlySet<HttpMethod> = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/** A v1 success envelope with its data and optional meta (pagination). */
+export interface V1Result<T> {
+  data: T;
+  meta?: ApiMeta;
+}
+
+/** Transport for `/api/v1` routes: unwraps the success envelope. */
+export interface V1Transport {
+  request<T>(method: HttpMethod, path: string, options?: RequestOptions): Promise<V1Result<T>>;
+}
 
 export function defaultRequestId(): string {
   const cryptoRef = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
@@ -95,13 +117,14 @@ export interface ApiClient {
   patch<T = unknown>(path: string, body?: unknown, options?: RequestOptions): Promise<T>;
   delete<T = unknown>(path: string, options?: RequestOptions): Promise<T>;
   /** Helpers for `/api/v1` routes; they unwrap the `data` field of the success envelope. */
-  v1: {
-    get<T>(path: string, options?: Omit<RequestOptions, 'body'>): Promise<T>;
-    health: {
-      live(): Promise<HealthLiveData>;
-      ready(): Promise<HealthReadyData>;
+  v1: V1Transport &
+    CrmResources & {
+      get<T>(path: string, options?: Omit<RequestOptions, 'body'>): Promise<T>;
+      health: {
+        live(): Promise<HealthLiveData>;
+        ready(): Promise<HealthReadyData>;
+      };
     };
-  };
 }
 
 export function createApiClient(options: ApiClientOptions): ApiClient {
@@ -127,6 +150,10 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     if (!init.anonymous && options.getToken) {
       const token = await options.getToken();
       if (token) headers.Authorization = `Bearer ${token}`;
+    }
+    if (UNSAFE_METHODS.has(method) && options.getCsrfToken) {
+      const csrf = await options.getCsrfToken();
+      if (csrf) headers[CSRF_HEADER] = csrf;
     }
 
     let body: BodyInit | undefined;
@@ -155,7 +182,13 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     let parsed: unknown;
     try {
       const url = buildUrl(await resolveBaseUrl(), path, init.query);
-      response = await fetchImpl(url, { method, headers, body, signal: controller.signal });
+      response = await fetchImpl(url, {
+        method,
+        headers,
+        body,
+        signal: controller.signal,
+        ...(options.credentials ? { credentials: options.credentials } : {}),
+      });
       parsed = await parseBody(response);
     } catch (cause) {
       const code = timedOut ? 'TIMEOUT' : init.signal?.aborted ? 'ABORTED' : 'NETWORK_ERROR';
@@ -183,9 +216,15 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     return parsed as T;
   }
 
+  const transport: V1Transport = {
+    async request<T>(method: HttpMethod, path: string, init?: RequestOptions) {
+      const envelope = await request<ApiSuccess<T>>(method, `${API_V1_PREFIX}${path}`, init);
+      return envelope.meta ? { data: envelope.data, meta: envelope.meta } : { data: envelope.data };
+    },
+  };
+
   async function v1Get<T>(path: string, init?: Omit<RequestOptions, 'body'>): Promise<T> {
-    const envelope = await request<ApiSuccess<T>>('GET', `${API_V1_PREFIX}${path}`, init);
-    return envelope.data;
+    return (await transport.request<T>('GET', path, init)).data;
   }
 
   return {
@@ -196,6 +235,8 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     patch: (path, body, init) => request('PATCH', path, { ...init, body }),
     delete: (path, init) => request('DELETE', path, init),
     v1: {
+      ...transport,
+      ...createResources(transport),
       get: v1Get,
       health: {
         live: () => v1Get<HealthLiveData>('/health/live', { anonymous: true }),

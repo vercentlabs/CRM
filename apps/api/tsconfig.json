@@ -1,10 +1,6 @@
 {
   "extends": "@crm/config/tsconfig/node.json",
   "compilerOptions": {
-    // Incremental migration: legacy JavaScript is compiled but not type-checked.
-    // New code under src/platform (and all future modules) is strict TypeScript.
-    "allowJs": true,
-    "checkJs": false,
     "declaration": false,
     "declarationMap": false,
     "noEmit": true

@@ -1,0 +1,88 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+/**
+ * Layering rules of the modular monolith (docs/architecture/API.md):
+ * routes/controllers/legacy adapters never touch SQL; services and
+ * repositories never touch Express; no JavaScript backend sources remain.
+ */
+
+const src = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
+
+function files(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    return entry.isDirectory() ? files(full) : [full];
+  });
+}
+
+const all = files(src);
+const moduleFiles = all.filter(
+  (f) =>
+    f.includes(`${path.sep}modules${path.sep}`) && f.endsWith('.ts') && !f.endsWith('.test.ts'),
+);
+const rel = (f: string) => path.relative(src, f).split(path.sep).join('/');
+const read = (f: string) => readFileSync(f, 'utf8');
+
+const httpLayer = moduleFiles.filter((f) => /\.(controller|routes|legacy|webhooks)\.ts$/.test(f));
+const domainLayer = moduleFiles.filter((f) => /\.(service|repository)\.ts$/.test(f));
+
+describe('architecture', () => {
+  it('finds the module layers', () => {
+    expect(httpLayer.length).toBeGreaterThan(20);
+    expect(domainLayer.length).toBeGreaterThan(20);
+  });
+
+  it('keeps SQL out of routes, controllers and legacy adapters', () => {
+    const offenders = httpLayer.filter((f) => {
+      const text = read(f);
+      return (
+        /\bpool\.(query|connect)\b|\.query\(\s*[`'"]|platform\/db\.js|@crm\/database/.test(text) ||
+        /\b(SELECT|INSERT INTO|UPDATE|DELETE FROM)\s/.test(text)
+      );
+    });
+    expect(offenders.map(rel)).toEqual([]);
+  });
+
+  it('keeps Express out of services and repositories', () => {
+    const offenders = domainLayer.filter((f) =>
+      /from 'express'|\bres\.(status|json|send)\(|\breq\.(body|params|query)\b/.test(read(f)),
+    );
+    expect(offenders.map(rel)).toEqual([]);
+  });
+
+  it('never authorizes by numeric role id', () => {
+    const offenders = all
+      .filter((f) => f.endsWith('.ts'))
+      .filter((f) =>
+        /role_?[iI]d\s*(===|!==|==|!=|<=|>=|<|>)\s*\d|legacyRoleId\s*(===|!==|==|!=)\s*\d|LEGACY_ROLE_IDS\.\w+\s*(===|!==)/.test(
+          read(f),
+        ),
+      );
+    expect(offenders.map(rel)).toEqual([]);
+  });
+
+  it('reads the tenant only from the verified session', () => {
+    const offenders = moduleFiles.filter((f) =>
+      /(body|query|params)\.(organization_?[iI]d|org)\b/.test(read(f)),
+    );
+    // Public organization ids appear only where the user names an organization they belong to.
+    const allowed = [
+      'modules/auth/auth.routes.ts',
+      'modules/organizations/organizations.routes.ts',
+    ];
+    expect(offenders.map(rel).filter((f) => !allowed.includes(f))).toEqual([]);
+  });
+
+  it('has no JavaScript backend sources left', () => {
+    expect(all.filter((f) => /\.(js|cjs|mjs)$/.test(f)).map(rel)).toEqual([]);
+  });
+
+  it('has one authorization middleware', () => {
+    expect(all.some((f) => /middleware[\\/]auth\.middleware/.test(f))).toBe(false);
+    const imports = all.filter((f) => /from '.*auth\.middleware/.test(read(f)));
+    expect(imports.map(rel)).toEqual([]);
+  });
+});

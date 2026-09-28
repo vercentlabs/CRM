@@ -1,0 +1,36 @@
+import type { z } from 'zod';
+import type * as s from './schemas.js';
+
+/** Request-body types (what clients send) of the /api/v1 CRM endpoints. */
+export type CreateLeadInput = z.input<typeof s.createLeadSchema>;
+export type UpdateLeadInput = z.input<typeof s.updateLeadSchema>;
+export type AssignmentInput = z.input<typeof s.assignmentSchema>;
+export type CreateFollowupInput = z.input<typeof s.createFollowupSchema>;
+export type CreateCustomerInput = z.input<typeof s.createCustomerSchema>;
+export type UpdateCustomerInput = z.input<typeof s.updateCustomerSchema>;
+export type CreateOpportunityInput = z.input<typeof s.createOpportunitySchema>;
+export type UpdateOpportunityInput = z.input<typeof s.updateOpportunitySchema>;
+export type CreateTaskInput = z.input<typeof s.createTaskSchema>;
+export type UpdateTaskInput = z.input<typeof s.updateTaskSchema>;
+export type CreateCalendarEventInput = z.input<typeof s.createCalendarEventSchema>;
+export type UpdateCalendarEventInput = z.input<typeof s.updateCalendarEventSchema>;
+export type CreateNoteInput = z.input<typeof s.createNoteSchema>;
+export type UpdateNoteInput = z.input<typeof s.updateNoteSchema>;
+export type InitiateCallInput = z.input<typeof s.initiateCallSchema>;
+export type EndCallInput = z.input<typeof s.endCallSchema>;
+export type SendMessageInput = z.input<typeof s.sendMessageSchema>;
+export type BulkMessageInput = z.input<typeof s.bulkMessageSchema>;
+export type MessageStatusInput = z.input<typeof s.messageStatusSchema>;
+export type CreateConversationInput = z.input<typeof s.createConversationSchema>;
+export type SendChatMessageInput = z.input<typeof s.sendChatMessageSchema>;
+export type PresenceInput = z.input<typeof s.presenceSchema>;
+export type CreateLocationInput = z.input<typeof s.createLocationSchema>;
+export type UpdateLocationInput = z.input<typeof s.updateLocationSchema>;
+export type CheckInInput = z.input<typeof s.checkInSchema>;
+export type UpdateSettingsInput = z.input<typeof s.updateSettingsSchema>;
+export type CreateMemberInput = z.input<typeof s.createMemberSchema>;
+export type UpdateMemberInput = z.input<typeof s.updateMemberSchema>;
+export type UpdateProfileInput = z.input<typeof s.updateProfileSchema>;
+export type ForgotPasswordInput = z.input<typeof s.forgotPasswordSchema>;
+export type ResetPasswordInput = z.input<typeof s.resetPasswordSchema>;
+export type VerifyResetTokenInput = z.input<typeof s.verifyResetTokenSchema>;

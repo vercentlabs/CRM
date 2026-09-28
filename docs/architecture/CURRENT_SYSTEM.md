@@ -1,4 +1,4 @@
-# Current System (as of Phase 1, 2026-09-28)
+# Current System (updated after Phase 3, 2026-09-28)
 
 A snapshot of what exists, so later phases don't have to rediscover it. Paths are post-Phase-1.
 
@@ -6,7 +6,7 @@ A snapshot of what exists, so later phases don't have to rediscover it. Paths ar
 
 | Part   | Path          | Stack                                                                                                         | Notes                                                                                        |
 | ------ | ------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| API    | `apps/api`    | Node ≥22, Express 5, ESM JavaScript, `pg`                                                                     | ~8k LOC. Controllers hold SQL + business logic. New platform code in `src/platform/*.ts`.    |
+| API    | `apps/api`    | Node ≥22, Express 5, strict TypeScript, `pg`                                                                  | Modular monolith since Phase 3 (`src/modules/<domain>`); see `API.md`.                       |
 | Web    | `apps/web`    | Next.js 16 (App Router, Turbopack, React Compiler), React 19.2, Redux Toolkit (notes only), Tailwind 4, axios | JavaScript. Every page is a client component (`'use client'`).                               |
 | Mobile | `apps/mobile` | Expo SDK 54, React Native 0.81, React 19.1, React Navigation 7, NativeWind 4                                  | TypeScript (strict). Own `fetch` client. EAS project configured.                             |
 | Worker | `apps/worker` | TypeScript                                                                                                    | Phase 1 skeleton only; no jobs yet.                                                          |
@@ -14,7 +14,7 @@ A snapshot of what exists, so later phases don't have to rediscover it. Paths ar
 
 Before Phase 1 the apps lived at `crm-backend/`, `c-frontend/c-frontend/crm-frontend/` and `crm-mobile/crm-mobile/crm-mobile/`, each with its own lockfile.
 
-## Domains (API route prefix → controller)
+## Domains (legacy route prefix → module; /api/v1 equivalents in `API.md`)
 
 | Domain                      | Legacy prefix                                     | Tables                                               | Guard (built-in role equivalent; enforced by permissions since Phase 2) |
 | --------------------------- | ------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------- |
@@ -26,7 +26,7 @@ Before Phase 1 the apps lived at `crm-backend/`, `c-frontend/c-frontend/crm-fron
 | Tasks                       | `/tasks`                                          | tasks                                                | any                                                                     |
 | Follow-ups                  | `/followups`                                      | followups                                            | any                                                                     |
 | Notes                       | `/notes`                                          | notes                                                | any (ownership checked in controller)                                   |
-| Calls (Plivo)               | `/calls`, `/api/plivo/webhook/*`                  | calls                                                | webhooks public, unsigned                                               |
+| Calls (Plivo)               | `/calls`, `/api/plivo/webhook/*`                  | calls                                                | webhooks signature-verified since Phase 2                               |
 | Calendar                    | `/calendar`                                       | tasks (calendar events are rows in `tasks`)          | any                                                                     |
 | SMS-style messages          | `/messages`, `/api/lead-messages`                 | messages                                             | any                                                                     |
 | Chat                        | `/api/chat`                                       | chat_conversations, chat_participants, chat_messages | any (polling, no websockets)                                            |
@@ -53,15 +53,15 @@ Sessions and tenancy are described in `TENANCY_AND_AUTH.md`. In short:
 
 ```
 web (axios, lib/api.js + lib/axios.js) ─┐
-mobile (fetch, services/api.ts) ────────┼─► Express routes ─► controllers (SQL via pg pool) ─► PostgreSQL
+mobile (fetch, services/api.ts) ────────┼─► /api/v1 registry or legacy adapters ─► services ─► repositories ─► PostgreSQL
 Plivo webhooks ─────────────────────────┘                     └─► ImageKit / Plivo / SMTP / Alpha Vantage
 ```
 
-The API client base URL comes from `NEXT_PUBLIC_API_BASE_URL` on web and from `EXPO_PUBLIC_API_BASE_URL` on mobile (overridable at runtime and stored on the device). Responses mostly use `{ success, message, data }` from `utils/response.js`, but many controllers hand-roll `{ message }` or `{ error }`.
+The API client base URL comes from `NEXT_PUBLIC_API_BASE_URL` on web and from `EXPO_PUBLIC_API_BASE_URL` on mobile (overridable at runtime and stored on the device). `/api/v1` uses the standard envelopes; legacy adapters keep each endpoint's historical shape (see `API.md`).
 
 ## Entry points
 
-- API: `apps/api/src/server.js` (env validation → `app.js` → listen, graceful shutdown). Routes are mounted in `src/app.js`.
+- API: `apps/api/src/server.ts` (env validation → `app.ts` → listen, graceful shutdown). Modules are registered in `src/modules/index.ts`.
 - Web: `apps/web/src/app/layout.js`, pages in `src/app/**/page.js`, auth in `src/context/AuthContext.js`.
 - Mobile: `apps/mobile/index.ts` → `App.tsx` → `src/navigation/RootNavigator.tsx`, auth in `src/context/AuthContext.tsx`.
 - Worker: `apps/worker/src/index.ts`.
@@ -70,8 +70,8 @@ The API client base URL comes from `NEXT_PUBLIC_API_BASE_URL` on web and from `E
 ## Architectural risks & technical debt
 
 1. ~~No tenancy~~: fixed in Phase 2. Every business table is tenant-owned; see `TENANCY_AND_AUTH.md`.
-2. **Authorization:** centralized in Phase 2 (permissions and scopes), but scope predicates still live in each legacy controller until the Phase 3 repositories.
-3. **Controllers own everything.** They mix SQL, validation, business rules and response formatting, and `lead.controller.js` alone is 1,158 LOC. There is no service or repository layer.
+2. ~~Authorization scattered~~: permissions since Phase 2; scope predicates live in repositories since Phase 3.
+3. ~~Controllers own everything~~: fixed in Phase 3 (routes → controller → service → repository).
 4. **Schema drift.** The schema was hand-managed in pgAdmin. `0001_baseline_schema.sql` is the reference snapshot (drift found so far: `chat_messages.file_type`, added in 0003).
 5. **SDK clients are constructed at import time** (ImageKit, Plivo), so the API cannot boot without those credentials and tests need placeholders.
 6. **Remaining hardening:** Plivo signatures are verified since Phase 2 (end-to-end check against the deployed URL is pending, Phase 7). The rate limiter is in-memory, and there is no helmet yet.

@@ -28,13 +28,13 @@ Clients never import `database`. `types` holds wire contracts only, never DB row
 ## TypeScript
 
 - All new code is strict TypeScript (`@crm/config/tsconfig/{node,library}.json`).
-- API migration is incremental: `allowJs` with `checkJs: false`. It is built by `tsc` to `dist/`, and `tsx` is used in dev. A JS file graduates to TS when its module is touched in Phase 3.
+- The API is fully TypeScript since Phase 3 (no `allowJs`). It is built by `tsc` to `dist/`, and `tsx` is used in dev.
 - Web is JS today and moves to TS page-by-page when screens are rebuilt. Mobile is already TS.
 
 ## API
 
 - **Versioning:** everything new is under `/api/v1`. Legacy unversioned routes stay mounted until the web and mobile callers move (Phase 3). They are then removed in one reviewed change, never silently.
-- **Module layout (Phase 3):** `src/modules/<domain>/{routes,controller,service,repository,schemas}.ts`. Controllers are thin (parse, authorize, call service, respond), services hold business rules, and repositories hold all SQL.
+- **Module layout (Phase 3, implemented):** `src/modules/<domain>/{routes,controller,service,repository,schemas,legacy}.ts`, declared in a route registry that drives mounting, validation and OpenAPI. Controllers are thin, services hold business rules and transactions, and repositories hold all SQL. Details in `API.md`.
 - **Success envelope:** `{ "success": true, "data": T, "meta"?: { "pagination"?: {page,limit,total,totalPages} } }`
 - **Error envelope:** `{ "success": false, "error": { "code": ErrorCode, "message": string, "details"?: [{field,message}], "requestId": string } }`
   - Codes (`@crm/types` `ERROR_CODES`): BAD_REQUEST 400, VALIDATION_FAILED 400, UNAUTHENTICATED 401, FORBIDDEN 403, NOT_FOUND 404, CONFLICT 409, PAYLOAD_TOO_LARGE 413, RATE_LIMITED 429, INTERNAL_ERROR 500, SERVICE_UNAVAILABLE 503.
@@ -43,14 +43,14 @@ Clients never import `database`. `types` holds wire contracts only, never DB row
 - **Request ID:** `x-request-id` is accepted if it matches `[A-Za-z0-9._:-]{8,128}`, otherwise generated. It is echoed on every response and included in error bodies and logs.
 - **Request context:** `AsyncLocalStorage` (`src/platform/request-context.ts`) carries `requestId`, `user` and (since Phase 2) the verified `auth` context: userId, sessionId, organizationId, membershipId, roleKey and permissions.
 - **Validation:** zod schemas from `@crm/validation`, shared with clients. Issues map to `details`.
-- **OpenAPI:** generated from the zod schemas and route registry in Phase 3 and served at `/api/v1/openapi.json`. `api-client` types derive from it.
+- **OpenAPI:** generated from the zod schemas and route registry and served at `/api/v1/openapi.json`. `api-client` uses the same sources directly (`@crm/types` DTOs, `@crm/validation` inputs) instead of code generation.
 - **Health:** `/api/v1/health/live` (process up) and `/api/v1/health/ready` (DB `SELECT 1` within 2s, not draining). They return status and latency only. Legacy `/health` is kept.
 
 ## Tenancy (implemented in Phase 2)
 
 - Tables: `organizations` (public UUID `public_id`), `organization_memberships` (`active`, `invited` or `suspended`), and `auth_sessions`. Every business table has `organization_id NOT NULL`; the details are in `TENANCY_AND_AUTH.md`.
 - The active organization is stored on the server session and bound into the access token. It is re-verified against the membership on every request and never taken from the request body.
-- Application-level filtering is mandatory: `tenantOf(req)` feeds every query. Postgres RLS remains optional defence-in-depth for a later phase.
+- Application-level filtering is mandatory: repositories take a `Tenant` built only from the verified session (`actorFrom(req.auth)`). Postgres RLS remains optional defence-in-depth for a later phase.
 
 ## Permissions (implemented in Phase 2)
 

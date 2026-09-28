@@ -1,4 +1,5 @@
-import pool from '../config/db.js';
+import { pool } from './db.js';
+import { errorFields, logger } from './logger.js';
 import { getRequestContext } from './request-context.js';
 
 const SENSITIVE_KEY = /pass(word)?|secret|token|hash|authorization|cookie|api[_-]?key/i;
@@ -79,15 +80,7 @@ export async function recordAuditEvent(input: AuditEventInput): Promise<void> {
       ],
     );
   } catch (error) {
-    console.error(
-      JSON.stringify({
-        level: 'error',
-        msg: 'audit_write_failed',
-        action: input.action,
-        requestId: context?.requestId,
-        error: error instanceof Error ? error.message : String(error),
-      }),
-    );
+    logger.error('audit_write_failed', { action: input.action, ...errorFields(error) });
   }
 }
 

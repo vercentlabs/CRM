@@ -50,7 +50,11 @@ export class AppError extends Error {
     return new AppError('BAD_REQUEST', message);
   }
 
-  static validation(details: ApiFieldError[], message = 'Validation failed') {
+  /** The first issue becomes the message so legacy clients (which show `message`) stay informative. */
+  static validation(
+    details: ApiFieldError[],
+    message = details[0]?.message ?? 'Validation failed',
+  ) {
     return new AppError('VALIDATION_FAILED', message, { details });
   }
 

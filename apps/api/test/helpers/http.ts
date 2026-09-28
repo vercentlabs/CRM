@@ -20,7 +20,7 @@ export async function startApp(): Promise<TestServer & { app: Express }> {
     baseUrl: `http://127.0.0.1:${port}`,
     close: async () => {
       await new Promise((resolve) => server.close(resolve));
-      const { default: pool } = await import('../../src/config/db.js');
+      const { pool } = await import('../../src/platform/db.js');
       await pool.end();
     },
   };

@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import express from 'express';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import app from '../src/app.js';
-import pool from '../src/config/db.js';
+import { pool } from '../src/platform/db.js';
 import { AppError } from '../src/platform/http/errors.js';
 import { errorHandler } from '../src/platform/http/error-handler.js';
 import { requestContextMiddleware } from '../src/platform/request-context.js';

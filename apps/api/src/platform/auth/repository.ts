@@ -5,7 +5,7 @@ import {
   type Permission,
   type RecordScope,
 } from '@crm/permissions';
-import pool from '../../config/db.js';
+import { pool } from '../db.js';
 
 type Queryable = Pick<typeof pool, 'query'>;
 

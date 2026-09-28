@@ -22,7 +22,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@crm/types": "workspace:*"
+    "@crm/types": "workspace:*",
+    "@crm/validation": "workspace:*"
   },
   "devDependencies": {
     "@crm/config": "workspace:*",

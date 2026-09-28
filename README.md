@@ -13,7 +13,7 @@ packages/
   validation/   shared zod schemas               api-client/   shared fetch client
   permissions/  permission names + role ids      database/     pg pool, health, migrations
 infrastructure/docker/   api / web / worker Dockerfiles (build from repo root)
-docs/architecture/       CURRENT_SYSTEM, TARGET_SYSTEM, TENANCY_AND_AUTH, GUARDRAILS, MIGRATION_TRACKER
+docs/architecture/       CURRENT_SYSTEM, TARGET_SYSTEM, API, TENANCY_AND_AUTH, GUARDRAILS, MIGRATION_TRACKER
 ```
 
 ## Getting started
@@ -42,6 +42,6 @@ Set `TEST_DATABASE_URL` to a disposable Postgres to enable the database integrat
 
 ## API
 
-Health checks are at `GET /api/v1/health/live` and `GET /api/v1/health/ready`. New endpoints go under `/api/v1` and use the envelopes described in `docs/architecture/TARGET_SYSTEM.md`. The legacy unversioned routes keep working until Phase 3 migrates their callers.
+Health checks are at `GET /api/v1/health/live` and `GET /api/v1/health/ready`. Every domain is served under `/api/v1` (OpenAPI at `GET /api/v1/openapi.json`); see `docs/architecture/API.md`. The legacy unversioned routes are deprecated adapters over the same services and keep working until the web and mobile clients move.
 
-Read `docs/architecture/GUARDRAILS.md` and `docs/architecture/TENANCY_AND_AUTH.md` before adding code. Every query on tenant data must be bounded by the verified organization (`tenantOf(req)`).
+Read `docs/architecture/GUARDRAILS.md` and `docs/architecture/TENANCY_AND_AUTH.md` before adding code. Every query on tenant data must be bounded by the verified organization (repositories take a `Tenant` from `actorFrom(req.auth)`).

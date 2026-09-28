@@ -11,7 +11,7 @@
  */
 import 'dotenv/config';
 import { createPool } from '@crm/database';
-import { bootstrapOrganization } from '../platform/organizations/bootstrap.js';
+import { bootstrapOrganization } from '../modules/organizations/organizations.bootstrap.js';
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -20,7 +20,11 @@ function required(name: string): string {
 }
 
 async function main(): Promise<void> {
-  const pool = createPool({ connectionString: required('DATABASE_URL'), max: 1, applicationName: 'crm-org-bootstrap' });
+  const pool = createPool({
+    connectionString: required('DATABASE_URL'),
+    max: 1,
+    applicationName: 'crm-org-bootstrap',
+  });
   try {
     const organizationName = required('BOOTSTRAP_ORG_NAME');
     const adminEmail = required('BOOTSTRAP_ADMIN_EMAIL');

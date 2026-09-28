@@ -1,7 +1,7 @@
 import bcrypt from 'bcrypt';
 import { BUILT_IN_ROLES, BUILT_IN_ROLE_KEYS, ALL_PERMISSIONS } from '@crm/permissions';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bootstrapOrganization } from '../src/platform/organizations/bootstrap.js';
+import { bootstrapOrganization } from '../src/modules/organizations/organizations.bootstrap.js';
 import { createTestSchema, hasTestDatabase, type TestSchema } from './helpers/db.js';
 import { call, startApp, type TestServer } from './helpers/http.js';
 

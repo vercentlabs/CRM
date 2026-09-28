@@ -60,11 +60,11 @@ These are the implementation-critical facts. Read this before touching any query
 
 ## Server primitives (use these, never ad-hoc checks)
 
-- `authenticate` (`middleware/auth.middleware.js` default export) handles authentication plus verified tenant context. It sets `req.auth` (`AuthSubject`: userId, sessionId, organizationId, organizationPublicId, membershipId, roleKey, permissions), sets `req.user` (legacy `{userId, roleId, email, name}`), and fills the AsyncLocalStorage context `auth`.
+- `authenticate` (`src/platform/auth/middleware.ts`) handles authentication plus verified tenant context. It sets `req.auth` (`AuthSubject`: userId, sessionId, organizationId, organizationPublicId, membershipId, roleKey, permissions), sets `req.user` (legacy `{userId, roleId, email, name}`), and fills the AsyncLocalStorage context `auth`.
 - `requirePermission(p)`, `requireAnyPermission(...p)` and `requireScope(p, 'organization')` all answer 403 with a generic message and no role details.
-- Controllers obtain the tenant only through `tenantOf(req)`, `scopeFor(req, p)` and `isActiveMember(orgId, userId)` from `src/platform/tenancy.ts`. Every read, update or delete includes `organization_id = $n`. Inserts take `organization_id` from `tenantOf(req)`. Foreign ids from the body (assignees, lead_id, location_id, chat participants) are validated inside the organization.
+- Services obtain the tenant only through `actorFrom(req.auth)` and `ownerFilter(actor, p)` / `assertMember` / `filterActiveMembers` from `src/platform/tenancy.ts` (Phase 3). Repositories take `(db, tenant, …)`, every read, update or delete includes `organization_id = $n`, and inserts take `organization_id` from `tenant`. Foreign ids from the body (assignees, lead_id, location_id, chat participants) are validated inside the organization.
 - **IDOR rule:** a record in another organization answers **404**. A record in the same organization but outside the caller's scope answers 403 (legacy behavior).
-- **Audit:** `recordAuditEvent()` (`src/platform/audit.ts`), or the legacy `logAuditEvent()`, stamps organization, actor, request id, IP and user agent from context and redacts password, token, hash and key fields.
+- **Audit:** `recordAuditEvent()` (`src/platform/audit.ts`) stamps organization, actor, request id, IP and user agent from context and redacts password, token, hash and key fields.
 - **Rate limiting:** an in-memory per-IP+email limiter covers login, refresh and password reset (`AUTH_RATE_LIMIT_MAX` per `AUTH_RATE_LIMIT_WINDOW_SECONDS`). Phase 7 moves it to a shared store.
 - **Plivo:** webhooks require a valid `X-Plivo-Signature-V3` over `PLIVO_WEBHOOK_URL` + suffix (SDK `validateV3Signature`). They fail closed when the URL is not configured.
 

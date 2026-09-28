@@ -5,8 +5,8 @@
   "type": "module",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "tsx watch src/server.js",
-    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/server.ts",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
@@ -34,15 +34,17 @@
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.9.7",
     "plivo": "^4.0.0",
-    "uuid": "^9.0.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@seriousme/openapi-schema-validator": "^2.11.0",
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^1.4.13",
     "@types/node": "^22.19.0",
+    "@types/nodemailer": "^6.4.24",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3",
     "vitest": "^5.0.2"

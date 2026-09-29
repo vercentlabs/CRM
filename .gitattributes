@@ -1,4 +1,6 @@
-* text=auto
+# LF in the repository AND in every working tree (Prettier checks LF; Windows
+# checkouts with core.autocrlf would otherwise fail `pnpm format:check`).
+* text=auto eol=lf
 *.png binary
 *.jpg binary
 *.jpeg binary

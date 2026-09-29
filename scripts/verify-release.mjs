@@ -96,7 +96,7 @@ step('repository hygiene and secret scan', () => {
     ['ImageKit private key', /\bprivate_[A-Za-z0-9+/=]{20,}\b/],
     [
       'connection string with password',
-      /\b(postgres(ql)?|redis|rediss|mongodb(\+srv)?):\/\/[^:\s/'"`]+:(?!\$|\{|<|\*|pw\b|password\b|crm\b|crm_test_pw\b|e2e_pw\b|pass\b|secret\b|change)[^@\s'"`]{6,}@(?!(localhost|127\.0\.0\.1|postgres|redis|db|host)[:/])/,
+      /\b(postgres(ql)?|redis|rediss|mongodb(\+srv)?):\/\/[^:\s/'"`]+:(?!\$|\{|<|\*|\[REDACTED\]|pw\b|password\b|crm\b|crm_test_pw\b|e2e_pw\b|pass\b|secret\b|change)[^@\s'"`]{6,}@(?!(localhost|127\.0\.0\.1|postgres|redis|db|host)[:/])/,
     ],
   ];
   for (const file of files) {

@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import {
   createImageKitStorage,
   createMemoryStorage,
@@ -14,7 +15,11 @@ import { env } from './env.js';
  */
 
 export function createStorage(): FileStorage {
-  if (env.STORAGE_PROVIDER === 'memory') return createMemoryStorage();
+  if (env.STORAGE_PROVIDER === 'memory') {
+    // Stable per deployment so signed development URLs survive restarts.
+    const signingSecret = createHmac('sha256', env.JWT_SECRET).update('file-urls').digest('hex');
+    return createMemoryStorage({ signingSecret });
+  }
   return createImageKitStorage({
     publicKey: env.IMAGEKIT_PUBLIC_KEY,
     privateKey: env.IMAGEKIT_PRIVATE_KEY,

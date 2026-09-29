@@ -1,41 +1,31 @@
-import { getRequestId } from './request-context.js';
+import { buildInfo, createLogger, errorFields as safeErrorFields } from '@crm/observability';
+import { getRequestContext } from './request-context.js';
 
 /**
- * Minimal structured logger: one JSON line per event on stderr/stdout with the
- * current request id. Full observability (shipping, tracing) is Phase 6.
+ * The API's structured logger (@crm/observability): JSON lines with build
+ * version, request id and — once authenticated — organization and user ids;
+ * every field passes central redaction. Development uses readable lines.
  */
+const build = buildInfo();
 
-type Level = 'info' | 'warn' | 'error';
-type Fields = Record<string, unknown>;
+export const logger = createLogger({
+  service: 'api',
+  level:
+    (process.env.LOG_LEVEL as 'debug' | 'info' | 'warn' | 'error' | undefined) ??
+    (process.env.NODE_ENV === 'test' ? 'warn' : 'info'),
+  pretty: process.env.NODE_ENV === 'development' && process.env.LOG_FORMAT !== 'json',
+  base: { version: build.version, commit: build.commit },
+  context: () => {
+    const context = getRequestContext();
+    if (!context) return undefined;
+    return {
+      requestId: context.requestId,
+      ...(context.auth
+        ? { organizationId: context.auth.organizationId, userId: context.auth.userId }
+        : {}),
+    };
+  },
+});
 
-function write(level: Level, msg: string, fields: Fields = {}): void {
-  const requestId = getRequestId();
-  const line = JSON.stringify({
-    level,
-    msg,
-    time: new Date().toISOString(),
-    ...(requestId ? { requestId } : {}),
-    ...fields,
-  });
-  if (level === 'error') console.error(line);
-  else if (level === 'warn') console.warn(line);
-  else console.log(line);
-}
-
-/** Error → loggable fields (message and name only unless a stack is requested). */
-export function errorFields(error: unknown, withStack = false): Fields {
-  if (!(error instanceof Error)) return { error: String(error) };
-  return {
-    error: {
-      name: error.name,
-      message: error.message,
-      ...(withStack ? { stack: error.stack } : {}),
-    },
-  };
-}
-
-export const logger = {
-  info: (msg: string, fields?: Fields) => write('info', msg, fields),
-  warn: (msg: string, fields?: Fields) => write('warn', msg, fields),
-  error: (msg: string, fields?: Fields) => write('error', msg, fields),
-};
+/** Error → loggable fields (name, code and first line of the message; redacted). */
+export const errorFields = safeErrorFields;

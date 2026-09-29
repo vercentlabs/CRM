@@ -359,6 +359,118 @@ describe.skipIf(!hasTestDatabase)('runtime platform (real HTTP + PostgreSQL)', (
     });
   });
 
+  describe('entitlement matrix', () => {
+    let invalidate: () => void = () => undefined;
+    beforeAll(async () => {
+      ({ invalidateEntitlements: invalidate } = await import('../src/platform/entitlements.js'));
+      // Known starting point for both organizations (earlier suites change plans).
+      await setPlan(fx.orgA.id, 'matrix-full', FULL);
+      await setPlan(fx.orgB.id, 'matrix-full-b', FULL);
+    });
+    const FULL: Array<[string, boolean, number | null]> = [
+      ['seats', true, null],
+      ['reports.export', true, null],
+      ['files.upload', true, null],
+      ['messages.bulk', true, null],
+      ['storage.bytes', true, null],
+    ];
+    const setPlan = async (
+      orgId: number,
+      key: string,
+      rows: Array<[string, boolean, number | null]>,
+    ) => {
+      const plan = (
+        await db.pool.query(
+          `INSERT INTO plans (key, name) VALUES ($1, $1) ON CONFLICT (key) DO UPDATE SET name = EXCLUDED.name RETURNING id`,
+          [key],
+        )
+      ).rows[0].id;
+      await db.pool.query('DELETE FROM plan_entitlements WHERE plan_id = $1', [plan]);
+      for (const [k, enabled, limit] of rows) {
+        await db.pool.query(
+          'INSERT INTO plan_entitlements (plan_id, key, enabled, limit_value) VALUES ($1, $2, $3, $4)',
+          [plan, k, enabled, limit],
+        );
+      }
+      await db.pool.query('UPDATE subscriptions SET plan_id = $1 WHERE organization_id = $2', [
+        plan,
+        orgId,
+      ]);
+      invalidate();
+    };
+    const uploadPng = async (who: string) => {
+      const form = new FormData();
+      form.append('file', new Blob([PNG], { type: 'image/png' }), 'p.png');
+      const res = await fetch(`${base}/api/v1/files/chat-attachments`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token[who]}` },
+        body: form,
+      });
+      return { status: res.status, body: (await res.json()) as Json };
+    };
+    const operations: Record<string, (who: string) => Promise<{ status: number; body: Json }>> = {
+      'reports.export': (who) => as(who, 'GET', '/reports/leads-export'),
+      'files.upload': (who) => uploadPng(who),
+      'messages.bulk': (who) =>
+        as(who, 'POST', '/messages/bulk', {
+          lead_ids: [who === 'bAdmin' ? fx.records.leadB1 : fx.records.leadA1],
+          channel: 'sms',
+          content: 'hi',
+        }),
+    };
+
+    it.each(Object.keys(operations))(
+      'disabling %s blocks only that capability, only in that organization',
+      async (feature) => {
+        await setPlan(
+          fx.orgA.id,
+          `matrix-${feature.replace('.', '-')}`,
+          FULL.map(([k, e, l]) => [k, k === feature ? false : e, l]),
+        );
+        try {
+          const denied = await operations[feature]!('aAdmin');
+          expect(denied.status).toBe(403);
+          expect(denied.body.error.code).toBe('FEATURE_NOT_ENABLED');
+          for (const other of Object.keys(operations).filter((f) => f !== feature)) {
+            const res = await operations[other]!('aAdmin');
+            expect(res.body?.error?.code, other).not.toBe('FEATURE_NOT_ENABLED');
+          }
+          const unaffected = await operations[feature]!('bAdmin');
+          expect(unaffected.body?.error?.code).not.toBe('FEATURE_NOT_ENABLED');
+        } finally {
+          await setPlan(fx.orgA.id, 'matrix-full', FULL);
+        }
+      },
+    );
+
+    it('enforces the storage limit per organization', async () => {
+      const used = Number(
+        (
+          await db.pool.query(
+            `SELECT COALESCE((SELECT value FROM usage_counters WHERE organization_id = $1
+               AND metric = 'storage.bytes' AND period = 'lifetime'), 0) AS v`,
+            [fx.orgA.id],
+          )
+        ).rows[0].v,
+      );
+      await setPlan(
+        fx.orgA.id,
+        'matrix-storage',
+        FULL.map(([k, e, l]) => [k, e, k === 'storage.bytes' ? used + PNG.length : l]),
+      );
+      try {
+        expect((await uploadPng('aSales')).status).toBe(201);
+        const over = await uploadPng('aSales');
+        expect(over.status).toBe(409);
+        expect(over.body.error.code).toBe('PLAN_LIMIT_REACHED');
+        const other = await uploadPng('bAdmin');
+        expect(other.status, JSON.stringify(other.body)).toBe(201);
+      } finally {
+        await setPlan(fx.orgA.id, 'matrix-full', FULL);
+      }
+    });
+  });
+
   describe('files', () => {
     const upload = async (who: string, content: Buffer, type: string, name = 'photo.png') => {
       const form = new FormData();
@@ -427,10 +539,11 @@ describe.skipIf(!hasTestDatabase)('runtime platform (real HTTP + PostgreSQL)', (
       });
       expect(sent.status).toBe(201);
       expect(sent.body.data).toMatchObject({
-        attachment_url: uploaded.url,
         message_type: 'image',
         file_type: 'image/png',
+        file_id: uploaded.id,
       });
+      expect(sent.body.data.attachment_url.split('?')[0]).toBe(uploaded.url.split('?')[0]);
       expect(
         (await as('aSales', 'POST', conversation, { content: 'again', file_id: uploaded.id }))
           .status,
@@ -455,6 +568,81 @@ describe.skipIf(!hasTestDatabase)('runtime platform (real HTTP + PostgreSQL)', (
       expect(await usage(fx.orgA.id)).toBe(before - PNG.length);
       expect((await events('file.deleted')).at(-1)).toMatchObject({ organization_id: fx.orgA.id });
       expect((await as('aSales', 'DELETE', `/files/${uploaded.id}`)).status).toBe(404);
+    });
+  });
+
+  describe('file access (short-lived signed URLs)', () => {
+    const verify = async (url: string) => {
+      const { fileStorage } = await import('../src/platform/providers.js');
+      return (fileStorage() as unknown as { verifySignedUrl(u: string): boolean }).verifySignedUrl(
+        url,
+      );
+    };
+    const uploadAs = async (who: string) => {
+      const form = new FormData();
+      form.append('file', new Blob([PNG], { type: 'image/png' }), 'p.png');
+      const res = await fetch(`${base}/api/v1/files/chat-attachments`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token[who]}` },
+        body: form,
+      });
+      return ((await res.json()) as Json).data;
+    };
+
+    it('grants only the uploader and conversation participants; everything else is a uniform 404', async () => {
+      const uploaded = await uploadAs('aSales');
+      expect(await verify(uploaded.url)).toBe(true);
+      // Before attaching: only the uploader.
+      expect((await as('aManager', 'GET', `/files/${uploaded.id}/url`)).status).toBe(404);
+      const own = await as('aSales', 'GET', `/files/${uploaded.id}/url`);
+      expect(own.status).toBe(200);
+      expect(await verify(own.body.data.url)).toBe(true);
+      expect(new Date(own.body.data.expiresAt).getTime()).toBeGreaterThan(Date.now());
+
+      const sent = await as('aSales', 'POST', `/chat/conversations/${fx.records.convA}/messages`, {
+        content: 'signed',
+        file_id: uploaded.id,
+      });
+      expect(sent.status).toBe(201);
+      expect(await verify(sent.body.data.attachment_url)).toBe(true);
+
+      const participant = await as('aManager', 'GET', `/files/${uploaded.id}/url`);
+      expect(participant.status).toBe(200);
+      const listed = await as(
+        'aManager',
+        'GET',
+        `/chat/conversations/${fx.records.convA}/messages`,
+      );
+      const message = listed.body.data.find((m: Json) => m.id === sent.body.data.id);
+      expect(await verify(message.attachment_url)).toBe(true);
+
+      const denied = [
+        await as('aSales2', 'GET', `/files/${uploaded.id}/url`), // same org, not a participant
+        await as('aAdmin', 'GET', `/files/${uploaded.id}/url`), // org admin does not bypass chat privacy
+        await as('bAdmin', 'GET', `/files/${uploaded.id}/url`), // other tenant
+        await as('aSales', 'GET', `/files/00000000-0000-4000-8000-000000000000/url`), // guessed id
+      ];
+      for (const res of denied) {
+        expect(res.status).toBe(404);
+        expect(JSON.stringify(res.body)).not.toContain(uploaded.url.split('?')[0]);
+      }
+      const shape = (body: Json) => ({ ...body, error: { ...body.error, requestId: undefined } });
+      expect(shape(denied[0]!.body)).toEqual(shape(denied[3]!.body));
+
+      // Deleted: no new URLs, and the message no longer carries one.
+      expect((await as('aSales', 'DELETE', `/files/${uploaded.id}`)).status).toBe(200);
+      expect((await as('aSales', 'GET', `/files/${uploaded.id}/url`)).status).toBe(404);
+      const after = await as('aManager', 'GET', `/chat/conversations/${fx.records.convA}/messages`);
+      expect(
+        after.body.data.find((m: Json) => m.id === sent.body.data.id).attachment_url,
+      ).toBeNull();
+    });
+
+    it('rejects tampered and expired URLs', async () => {
+      const uploaded = await uploadAs('aSales');
+      expect(await verify(uploaded.url.replace(/signature=./, 'signature=0'))).toBe(false);
+      expect(await verify(uploaded.url.replace(/expires=\d+/, 'expires=1'))).toBe(false);
+      expect(await verify(uploaded.url.split('?')[0]!)).toBe(false);
     });
   });
 

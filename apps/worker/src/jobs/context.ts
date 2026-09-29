@@ -19,6 +19,14 @@ export interface WorkerDeps {
     allowPrivateWebhookTargets: boolean;
     webhookTimeoutMs: number;
     outboxRetentionDays: number;
+    /** Operational retention windows (maintenance.sweep). */
+    retention?: {
+      sessionDays: number;
+      passwordResetDays: number;
+      notificationDays: number;
+      deliveryDays: number;
+      deletedFileDays: number;
+    };
     fetch: typeof fetch;
     resolver?: Resolver | undefined;
   };

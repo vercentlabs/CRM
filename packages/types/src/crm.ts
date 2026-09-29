@@ -222,8 +222,14 @@ export interface ChatMessage {
   sender_id: number;
   content: string;
   message_type: string;
+  /**
+   * For tracked uploads: a short-lived signed URL (re-fetch the message or
+   * GET /files/:id/url when it expires). Legacy attachments keep their stored URL.
+   */
   attachment_url: string | null;
   file_type: string | null;
+  /** Public id of the tracked attachment (null for text and legacy attachments). */
+  file_id?: string | null;
   is_read: boolean;
   created_at: Timestamp;
   sender_name: string | null;
@@ -317,6 +323,8 @@ export interface ApiMetadata {
   name: string;
   version: string;
   openapi: string;
+  /** Release identity (package version + short commit) for incident correlation. */
+  build?: { version: string; commit: string };
 }
 
 /** `GET /reports/dashboard-summary` (own scope: my records). */
@@ -373,4 +381,35 @@ export interface OrganizationEntitlements {
   /** null = unlimited. */
   limits: Record<'seats' | 'storage.bytes', number | null>;
   usage: { seats: number; 'storage.bytes': number };
+}
+
+/** Outbound webhook endpoint (settings.integrations.manage). The signing secret is never included. */
+export interface WebhookEndpoint {
+  id: string;
+  url: string;
+  description: string | null;
+  events: string[];
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastDelivery: { status: string; at: string } | null;
+}
+
+/** Returned only by create and rotate-secret: the secret cannot be read again. */
+export interface WebhookEndpointWithSecret {
+  endpoint: WebhookEndpoint;
+  secret: string;
+}
+
+export interface WebhookEndpointInput {
+  url: string;
+  events: string[];
+  description?: string;
+}
+
+export interface WebhookEndpointUpdate {
+  url?: string;
+  events?: string[];
+  description?: string | null;
+  active?: boolean;
 }

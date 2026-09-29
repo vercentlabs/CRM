@@ -5,7 +5,7 @@ import { encryptSecret, parseSecretKey, verifySignature } from '@crm/integration
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seed, testDeps, type Seed } from './__tests__/fixtures.js';
 import type { JobContext } from './jobs/context.js';
-import type { Logger } from './logger.js';
+import { silentLogger, type Logger } from './logger.js';
 import * as maintenance from './processors/maintenance.js';
 import * as webhooks from './processors/webhooks.js';
 import { PermanentJobError } from './queue/types.js';
@@ -59,6 +59,7 @@ describe.skipIf(!hasTestDatabase)('outbound webhooks (PostgreSQL, no network)', 
     );
   const setup = (fetchImpl: ReturnType<typeof fakeFetch>, lines: string[] = []) => {
     const logger: Logger = {
+      ...silentLogger,
       info: (m, f) => lines.push(JSON.stringify([m, f])),
       warn: (m, f) => lines.push(JSON.stringify([m, f])),
       error: (m, f) => lines.push(JSON.stringify([m, f])),

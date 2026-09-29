@@ -1,0 +1,129 @@
+name: Deploy
+
+# Manual, approved deployments. Nothing deploys on push.
+#
+# Required GitHub configuration (operator action, see docs/operations/DEPLOYMENT.md):
+#   Environments "staging" and "production" — production with required
+#   reviewers and a branch rule allowing only main.
+#   Environment secrets:
+#     DATABASE_URL        migration connection (owner role), TLS
+#     DEPLOY_HOOK_API     HTTPS deploy hook / webhook of the API service
+#     DEPLOY_HOOK_WORKER  … of the worker service
+#     DEPLOY_HOOK_WEB     … of the web service
+#     SMOKE_EMAIL / SMOKE_PASSWORD   dedicated smoke-test account (optional)
+#   Environment variables:
+#     API_URL, WEB_URL, NEXT_PUBLIC_API_BASE_URL
+#
+# Order: images → backup check → migrations (forward-only) → API + worker →
+# web → smoke. A failed smoke leaves the previous images available for rollback.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        required: true
+      version:
+        description: Release version (semver, e.g. 1.0.0)
+        required: true
+      confirm_backup:
+        description: I confirm a fresh database backup/snapshot exists (required for production)
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  images:
+    name: Build and push images
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment }}
+    strategy:
+      matrix:
+        image: [api, worker, web]
+    steps:
+      - name: Validate inputs
+        run: |
+          echo "${{ inputs.version }}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+          if [ "${{ inputs.environment }}" = "production" ] && [ "${{ inputs.confirm_backup }}" != "true" ]; then
+            echo "Production deployments require a confirmed fresh backup." && exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image name
+        id: name
+        run: echo "ref=ghcr.io/${GITHUB_REPOSITORY,,}/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/${{ matrix.image }}.Dockerfile
+          push: true
+          tags: |
+            ${{ steps.name.outputs.ref }}:${{ inputs.version }}
+            ${{ steps.name.outputs.ref }}:${{ github.sha }}
+          build-args: |
+            APP_VERSION=${{ inputs.version }}
+            GIT_SHA=${{ github.sha }}
+            NEXT_PUBLIC_API_BASE_URL=${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+
+  migrate:
+    name: Database migrations (forward-only)
+    needs: images
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Status, apply, status
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/api:${{ inputs.version }}"
+          for cmd in status up status; do
+            docker run --rm -e DATABASE_URL -w /repo/packages/database "$IMAGE" node dist/cli/migrate.js "$cmd"
+          done
+
+  release:
+    name: Roll out and smoke test
+    needs: migrate
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trigger API and worker deploy hooks
+        run: |
+          curl -fsS -X POST "${{ secrets.DEPLOY_HOOK_API }}"
+          curl -fsS -X POST "${{ secrets.DEPLOY_HOOK_WORKER }}"
+      - name: Wait for the new API version
+        run: |
+          for i in $(seq 1 60); do
+            v=$(curl -fsS "${{ vars.API_URL }}/api/v1" | grep -o '"version":"[^"]*"' | head -1 || true)
+            [ "$v" = "\"version\":\"${{ inputs.version }}\"" ] && exit 0
+            sleep 10
+          done
+          echo "API did not report version ${{ inputs.version }}" && exit 1
+      - name: Trigger web deploy hook
+        run: curl -fsS -X POST "${{ secrets.DEPLOY_HOOK_WEB }}"
+      - name: API smoke test
+        env:
+          API_URL: ${{ vars.API_URL }}
+          WEB_ORIGIN: ${{ vars.WEB_URL }}
+          EXPECT_VERSION: ${{ inputs.version }}
+          SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: node scripts/smoke-api.mjs

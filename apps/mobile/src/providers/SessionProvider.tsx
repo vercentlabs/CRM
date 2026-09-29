@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { api, onSessionEvent } from '../lib/api';
 import { isStatus } from '../lib/errors';
+import { setDisplayTimeZone } from '../lib/format';
 import type { QueryKeyPart } from '../lib/query';
 import { tokens } from '../lib/tokens';
 
@@ -73,6 +74,8 @@ export function SessionProvider({
   );
   const [expired, setExpired] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // Dates render in the active organization's zone (idempotent, module-level).
+  setDisplayTimeZone(session?.organization.timezone);
 
   /** Drops tenant data and in-flight requests (sign-out, switch, expiry). */
   const clearTenantData = useCallback(async () => {

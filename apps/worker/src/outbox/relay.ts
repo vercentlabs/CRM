@@ -1,6 +1,7 @@
 import type { DatabasePool } from '@crm/database';
 import * as outbox from '../db/outbox.js';
 import { errorInfo, type Logger } from '../logger.js';
+import { outboxDispatchErrors } from '../metrics.js';
 import type { QueueDriver } from '../queue/types.js';
 import { routeEvent } from './routing.js';
 
@@ -52,6 +53,7 @@ export function createRelay(options: RelayOptions) {
           durationMs: Date.now() - started,
         });
       } catch (error) {
+        outboxDispatchErrors.inc();
         const message = (error as Error).message ?? String(error);
         if (item.attempts >= options.maxAttempts) {
           await outbox.markDead(options.db, item.id, message);
@@ -76,6 +78,9 @@ export function createRelay(options: RelayOptions) {
 
   return {
     dispatchOnce,
+    get running() {
+      return running;
+    },
     start() {
       if (running) return;
       running = true;

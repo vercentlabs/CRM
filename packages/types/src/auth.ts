@@ -37,7 +37,8 @@ export type RecordScopeName = 'own' | 'organization';
 /** `/api/v1/auth/*` session payload. */
 export interface AuthSessionView {
   user: AuthUser;
-  organization: OrganizationSummary;
+  /** The active organization, with its IANA time zone for displaying dates. */
+  organization: OrganizationSummary & { timezone: string };
   membership: { id: number; role: RoleSummary };
   /** permission → record scope granted by the active membership. */
   permissions: Record<string, RecordScopeName>;

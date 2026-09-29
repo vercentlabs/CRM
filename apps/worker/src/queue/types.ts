@@ -44,4 +44,6 @@ export interface QueueDriver {
   /** Stop taking work, let active jobs finish (bounded), close connections. */
   close(timeoutMs: number): Promise<void>;
   ping(): Promise<boolean>;
+  /** Job counts per queue and state (metrics). */
+  counts(): Promise<Record<string, Record<string, number>>>;
 }

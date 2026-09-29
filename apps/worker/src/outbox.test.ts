@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
 import { createTestSchema, hasTestDatabase, withTransaction, type TestSchema } from '@crm/database';
 import { appendEvent } from '@crm/events';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -152,6 +154,7 @@ describe.skipIf(!hasTestDatabase)('transactional outbox (PostgreSQL)', () => {
       start: async () => undefined,
       close: async () => undefined,
       ping: async () => false,
+      counts: async () => ({}),
     };
     await appendEvent(db.pool, leadCreated(fx.leadA));
     await relay(down).dispatchOnce();
@@ -207,5 +210,50 @@ describe.skipIf(!hasTestDatabase)('transactional outbox (PostgreSQL)', () => {
     );
     expect(await outbox.prune(db.pool, 14)).toBe(1);
     expect(await count()).toBe(1);
+  });
+  it('recovers jobs lost with Redis data by replaying outbox events (scripts/outbox-replay.mjs)', async () => {
+    const sms = fakeSms();
+    const { deps } = testDeps(db.pool, { sms });
+    const message = (
+      await db.pool.query(
+        `INSERT INTO messages (organization_id, lead_id, user_id, message_type, content, status, queued_at)
+         VALUES ($1, $2, $3, 'SMS', 'Lost in Redis', 'Queued', now()) RETURNING id`,
+        [fx.orgA, fx.leadA, fx.users.aSales],
+      )
+    ).rows[0].id as number;
+    const before = new Date(Date.now() - 1000);
+    await appendEvent(db.pool, {
+      type: 'message.requested',
+      organizationId: fx.orgA,
+      aggregateId: message,
+      payload: { messageId: message, leadId: fx.leadA, channel: 'sms' },
+    });
+    // Dispatched into a queue that is then lost before any worker ran the job.
+    const lost = createInlineDriver();
+    await relay(lost).dispatchOnce();
+    expect(sms.calls).toHaveLength(0);
+
+    const script = path.resolve(
+      import.meta.dirname,
+      '../../../packages/database/scripts/outbox-replay.mjs',
+    );
+    const output = execFileSync(
+      process.execPath,
+      [script, '--since', before.toISOString(), '--apply'],
+      {
+        env: { ...process.env, DATABASE_URL: db.url },
+        encoding: 'utf8',
+      },
+    );
+    expect(output).toMatch(/Marked 1 event\(s\) pending/);
+
+    const recovered = createInlineDriver();
+    await recovered.start(createJobRunner({ ...deps, queue: recovered }));
+    await relay(recovered, 'w-recover').dispatchOnce();
+    await recovered.drain();
+    expect(sms.calls).toHaveLength(1);
+    const row = (await db.pool.query('SELECT status FROM messages WHERE id = $1', [message]))
+      .rows[0];
+    expect(row.status).toBe('Sent');
   });
 });

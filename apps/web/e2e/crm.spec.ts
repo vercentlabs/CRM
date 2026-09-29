@@ -96,6 +96,43 @@ test.describe.serial('CRM critical paths', () => {
     await expect(page.getByRole('link', { name: `E2E Lead ${stamp}` })).toBeVisible();
   });
 
+  test('admin manages an outbound webhook; the secret is shown exactly once', async ({ page }) => {
+    await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
+    await page.goto('/settings?tab=webhooks');
+    const form = page.getByRole('form', { name: 'Add webhook' });
+    await form.getByLabel('Endpoint URL').fill(`https://example.com/crm-e2e-${stamp}`);
+    await form.getByLabel('lead.created').check();
+    await form.getByRole('button', { name: 'Add webhook' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Signing secret' });
+    await expect(dialog.getByTestId('webhook-secret')).toHaveText(/^whsec_/);
+    await dialog.getByRole('button', { name: 'Done' }).click();
+    const list = page.getByRole('list', { name: 'Webhook endpoints' });
+    await expect(list.getByText(`https://example.com/crm-e2e-${stamp}`)).toBeVisible();
+    await expect(page.getByTestId('webhook-secret')).toHaveCount(0);
+    // After a reload the secret is never shown again.
+    await page.reload();
+    await expect(page.getByText(/whsec_/)).toHaveCount(0);
+    await list.getByRole('button', { name: 'Disable' }).click();
+    await expect(list.getByText('Disabled')).toBeVisible();
+    await list.getByRole('button', { name: 'Delete' }).click();
+    await page
+      .getByRole('dialog', { name: 'Delete webhook?' })
+      .getByRole('button', { name: 'Delete' })
+      .click();
+    await expect(page.getByText('No webhooks yet')).toBeVisible();
+  });
+
+  test('a Sales member has no webhook settings and sees their notifications menu', async ({
+    page,
+  }) => {
+    await signIn(page, SALES_EMAIL, SALES_PASSWORD);
+    await page.goto('/settings?tab=webhooks');
+    await expect(page.getByText("You don't have access to this")).toBeVisible();
+    await page.getByRole('button', { name: /^Notifications/ }).click();
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('Escape');
+  });
+
   test('switching organization leaves no data from the previous one', async ({ page }) => {
     await signIn(page, ADMIN_EMAIL, ADMIN_PASSWORD);
     await page.goto('/leads');

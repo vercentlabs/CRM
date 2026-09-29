@@ -41,7 +41,7 @@ describe('runtime platform architecture', () => {
   });
 
   it('binds every tenant-table statement in worker data access to an organization', () => {
-    // Platform scans (reminders, upload expiry, outbox claiming) are explicitly listed.
+    // Platform scans (reminders, upload expiry, outbox claiming, retention) are explicitly listed.
     const platform = new Set([
       'createDueReminders',
       'expireUnattachedUploads',
@@ -57,6 +57,8 @@ describe('runtime platform architecture', () => {
       'markResetEmailed',
       'lockEmailDelivery',
       'setEmailDelivery',
+      'applyRetention',
+      'failStaleSending',
     ]);
     const dbFiles = files(path.join(apps, 'worker/src/db'));
     const offenders: string[] = [];

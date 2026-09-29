@@ -63,6 +63,7 @@ export function sessionView(
       id: subject.organizationPublicId,
       name: subject.organizationName,
       slug: subject.organizationSlug,
+      timezone: subject.organizationTimeZone,
     },
     membership: {
       id: subject.membershipId,

@@ -9,8 +9,9 @@ import {
   createSmtpSender,
   noSmsProvider,
   parseSecretKey,
+  plivoCallbackUrls,
 } from '@crm/integrations';
-import type { WorkerEnv } from './env.js';
+import { databaseSsl, type WorkerEnv } from './env.js';
 import type { WorkerDeps } from './jobs/context.js';
 import { jsonLogger, type Logger } from './logger.js';
 import { createBullmqDriver } from './queue/bullmq.js';
@@ -22,7 +23,12 @@ export function createRuntime(
   env: WorkerEnv,
   logger: Logger = jsonLogger,
 ): { deps: WorkerDeps; options: WorkerOptions } {
-  const db = createPool({ connectionString: env.DATABASE_URL, max: env.WORKER_CONCURRENCY + 4 });
+  const db = createPool({
+    connectionString: env.DATABASE_URL,
+    max: env.WORKER_CONCURRENCY + 4,
+    ssl: databaseSsl(env),
+    applicationName: 'crm-worker',
+  });
   const queue = env.REDIS_URL
     ? createBullmqDriver({
         url: env.REDIS_URL,
@@ -77,13 +83,20 @@ export function createRuntime(
     config: {
       frontendUrl: env.FRONTEND_URL ?? 'http://localhost:3000',
       smsStatusCallbackUrl: env.PLIVO_WEBHOOK_URL
-        ? `${env.PLIVO_WEBHOOK_URL.replace(/\/+$/, '')}/message-status`
+        ? plivoCallbackUrls(env.PLIVO_WEBHOOK_URL).messageStatus
         : undefined,
       webhookSecretKey: env.WEBHOOK_SECRET_KEY ? parseSecretKey(env.WEBHOOK_SECRET_KEY) : undefined,
       allowPrivateWebhookTargets:
         env.WEBHOOK_ALLOW_PRIVATE_TARGETS ?? env.NODE_ENV !== 'production',
       webhookTimeoutMs: env.WEBHOOK_TIMEOUT_MS,
       outboxRetentionDays: env.OUTBOX_RETENTION_DAYS,
+      retention: {
+        sessionDays: env.SESSION_RETENTION_DAYS,
+        passwordResetDays: env.PASSWORD_RESET_RETENTION_DAYS,
+        notificationDays: env.NOTIFICATION_RETENTION_DAYS,
+        deliveryDays: env.DELIVERY_RETENTION_DAYS,
+        deletedFileDays: env.DELETED_FILE_RETENTION_DAYS,
+      },
       fetch: globalThis.fetch,
     },
   };
@@ -103,6 +116,8 @@ export function createRuntime(
     healthPort: env.WORKER_HEALTH_PORT,
     shutdownTimeoutMs: env.WORKER_SHUTDOWN_TIMEOUT_MS,
     closeDatabase: true,
+    metricsToken: env.METRICS_TOKEN,
+    requireDurableQueue: env.NODE_ENV === 'production',
   };
   return { deps, options };
 }

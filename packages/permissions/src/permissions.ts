@@ -31,6 +31,7 @@ export const PERMISSIONS = {
   users: ['settings.users.read', 'settings.users.manage'],
   organization: ['settings.organization.manage'],
   audit: ['settings.audit.read'],
+  integrations: ['settings.integrations.manage'],
 } as const;
 
 export type PermissionGroup = keyof typeof PERMISSIONS;
@@ -78,6 +79,7 @@ export const PERMISSION_DESCRIPTIONS: Record<Permission, string> = {
   'settings.users.manage': 'Add members, change roles and suspend members',
   'settings.organization.manage': 'Manage organization settings and diagnostics',
   'settings.audit.read': 'View the organization audit log',
+  'settings.integrations.manage': 'Manage outbound webhooks and integration secrets',
 };
 
 const permissionSet: ReadonlySet<string> = new Set(ALL_PERMISSIONS);

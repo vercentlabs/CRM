@@ -1,4 +1,6 @@
+import { plivoCallbackUrls } from '@crm/integrations';
 import express, { Router } from 'express';
+import { env } from '../../platform/env.js';
 import { verifyPlivoSignature } from '../../platform/plivo-signature.js';
 import * as messages from '../messages/messages.service.js';
 import * as service from './calls.service.js';
@@ -30,7 +32,7 @@ export function plivoWebhookRouter(): Router {
           from: field(req.body, 'From'),
           status: field(req.body, 'CallStatus'),
         },
-        `${process.env.PLIVO_WEBHOOK_URL}/recording`,
+        plivoCallbackUrls(env.PLIVO_WEBHOOK_URL ?? '').recording,
       );
     } catch (error) {
       logFailure('answer', error);

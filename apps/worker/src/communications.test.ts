@@ -4,7 +4,7 @@ import { createMemoryEmailSender, ProviderError } from '@crm/integrations';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fakeSms, seed, testDeps, type Seed } from './__tests__/fixtures.js';
 import type { JobContext } from './jobs/context.js';
-import type { Logger } from './logger.js';
+import { silentLogger, type Logger } from './logger.js';
 import * as communications from './processors/communications.js';
 import { PermanentJobError } from './queue/types.js';
 
@@ -146,6 +146,7 @@ describe.skipIf(!hasTestDatabase)('communication jobs (PostgreSQL)', () => {
     it('never logs message bodies or phone numbers', async () => {
       const lines: string[] = [];
       const logger: Logger = {
+        ...silentLogger,
         info: (m, f) => lines.push(JSON.stringify([m, f])),
         warn: (m, f) => lines.push(JSON.stringify([m, f])),
         error: (m, f) => lines.push(JSON.stringify([m, f])),

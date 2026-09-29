@@ -23,8 +23,9 @@ const month = () => new Date().toISOString().slice(0, 7);
 
 /**
  * Lead message delivery. The row lock + status machine make the job
- * idempotent: only a 'Queued' message is sent; a message found in 'Sending'
- * means a previous attempt died mid-call, and because the provider may have
+ * idempotent: only a 'Queued' message is sent. A message in 'Sending' is
+ * either being sent by a concurrent attempt (inside the send lease: skipped)
+ * or was left by an attempt that died mid-call; because the provider may have
  * accepted it we fail it as DELIVERY_UNKNOWN rather than risk a duplicate.
  */
 export async function sendMessage(
@@ -36,6 +37,10 @@ export async function sendMessage(
   const claim = await withTransaction(deps.db, async (tx) => {
     const message = await comms.lockMessage(tx, organizationId, messageId);
     if (!message) return { skip: 'not_found' as const };
+    if (message.status === 'Sending' && message.sending_in_progress) {
+      // A concurrent attempt (another replica, or a redelivered job) is sending right now.
+      return { skip: 'in_progress' as const };
+    }
     if (message.status === 'Sending') {
       await comms.markFailed(tx, organizationId, messageId, {
         code: 'DELIVERY_UNKNOWN',

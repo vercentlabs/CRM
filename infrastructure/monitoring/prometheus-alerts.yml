@@ -1,0 +1,125 @@
+# Prometheus alerting rules for the CRM (API + worker).
+# Scrape configuration and routing: docs/operations/MONITORING.md.
+# Metric labels never contain organization or user ids; `status` is a class
+# (2xx/4xx/5xx) and `route` is the Express route template.
+groups:
+  - name: crm-availability
+    rules:
+      - alert: CrmApiDown
+        expr: up{job="crm-api"} == 0
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: API instance {{ $labels.instance }} is not being scraped
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#api-down
+
+      - alert: CrmWorkerDown
+        expr: up{job="crm-worker"} == 0
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: Worker {{ $labels.instance }} is not being scraped (reminders, emails, SMS and webhooks stop)
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#worker-down
+
+      - alert: CrmApiHigh5xxRate
+        expr: |
+          sum(rate(crm_http_requests_total{job="crm-api",status="5xx"}[5m]))
+            / clamp_min(sum(rate(crm_http_requests_total{job="crm-api"}[5m])), 1) > 0.02
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: More than 2% of API requests fail with 5xx
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#elevated-5xx
+
+      - alert: CrmApiLatencyP95High
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(crm_http_request_duration_seconds_bucket{job="crm-api",route!~".*/health/.*|/metrics"}[5m]))) > 1
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: API p95 latency above 1s for 10 minutes
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#slow-api
+
+  - name: crm-database
+    rules:
+      - alert: CrmDbPoolExhausted
+        expr: max by (instance) (crm_db_pool_connections{state="waiting"}) > 5
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: API requests are queueing for database connections on {{ $labels.instance }}
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#database-saturation
+
+      - alert: CrmDbErrors
+        expr: sum(rate(crm_db_errors_total[5m])) > 0.5
+        for: 5m
+        labels: { severity: warn }
+        annotations:
+          summary: Database query or pool errors are elevated
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#database-saturation
+
+  - name: crm-background
+    rules:
+      - alert: CrmOutboxBacklog
+        expr: max(crm_outbox_oldest_pending_seconds) > 300
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: Oldest undispatched outbox event is older than 5 minutes
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#outbox-backlog
+
+      - alert: CrmOutboxDeadEvents
+        expr: max(crm_outbox_events{state="dead"}) > 0
+        for: 15m
+        labels: { severity: warn }
+        annotations:
+          summary: Outbox events exhausted their dispatch attempts
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#dead-outbox-events
+
+      - alert: CrmQueueBacklog
+        expr: max by (queue) (crm_queue_jobs{state="waiting"}) > 500
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: Queue {{ $labels.queue }} has more than 500 waiting jobs
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#queue-backlog
+
+      - alert: CrmJobFailures
+        expr: sum by (job_name) (increase(crm_job_failures_total[15m])) > 5
+        labels: { severity: warn }
+        annotations:
+          summary: '{{ $labels.job_name }} failed terminally more than 5 times in 15 minutes (communications, webhooks or notifications)'
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#job-failures
+
+      - alert: CrmRemindersStalled
+        expr: sum(increase(crm_job_duration_seconds_count{job_name="reminders.scan"}[15m])) == 0
+        for: 15m
+        labels: { severity: warn }
+        annotations:
+          summary: No reminder scan has run for 15 minutes
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#worker-down
+
+  - name: crm-security
+    rules:
+      - alert: CrmRateLimitStoreUnavailable
+        expr: sum(increase(crm_rate_limit_store_errors_total[5m])) > 0
+        labels: { severity: page }
+        annotations:
+          summary: Redis rate-limit store errors — protected endpoints answer 503 (fail closed)
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#redis-unavailable
+
+      - alert: CrmAuthFailureSpike
+        expr: sum(rate(crm_auth_failures_total[5m])) > 5
+        for: 10m
+        labels: { severity: warn }
+        annotations:
+          summary: Sustained authentication failures (credential stuffing?)
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#auth-abuse
+
+      - alert: CrmRateLimitBlocksSpike
+        expr: sum by (policy) (rate(crm_rate_limit_blocks_total[5m])) > 1
+        for: 10m
+        labels: { severity: info }
+        annotations:
+          summary: Rate limit policy {{ $labels.policy }} is blocking sustained traffic
+          runbook: docs/operations/PRODUCTION_RUNBOOK.md#auth-abuse

@@ -1,3 +1,4 @@
+import { resolveTimeZone } from '@crm/validation';
 import {
   isPermission,
   normalizeScope,
@@ -39,6 +40,8 @@ export interface AuthSubject {
   organizationPublicId: string;
   organizationName: string;
   organizationSlug: string;
+  /** Validated IANA zone of the organization (UTC when unset or invalid). */
+  organizationTimeZone: string;
   membershipId: number;
   roleId: number;
   roleKey: string;
@@ -146,6 +149,7 @@ export async function loadAuthSubject(
     `SELECT s.id AS session_id, s.expires_at,
             u.id AS user_id, u.email, COALESCE(u.full_name, u.username) AS name,
             o.id AS organization_id, o.public_id, o.name AS organization_name, o.slug,
+            (SELECT st.value FROM settings st WHERE st.organization_id = o.id AND st.key = 'timezone') AS timezone,
             m.id AS membership_id,
             r.id AS role_id, r.key AS role_key, r.name AS role_name,
             COALESCE(
@@ -177,6 +181,7 @@ export async function loadAuthSubject(
     organizationPublicId: row.public_id,
     organizationName: row.organization_name,
     organizationSlug: row.slug,
+    organizationTimeZone: resolveTimeZone(row.timezone),
     membershipId: row.membership_id,
     roleId: row.role_id,
     roleKey: row.role_key,

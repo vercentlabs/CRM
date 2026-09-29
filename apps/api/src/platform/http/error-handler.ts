@@ -1,6 +1,10 @@
 import type { ApiErrorResponse } from '@crm/types';
 import type { NextFunction, Request, Response } from 'express';
+import { captureError } from '@crm/observability';
+import { errorFields, logger } from '../logger.js';
+import { authFailures, dbErrors } from '../metrics.js';
 import { getRequestId } from '../request-context.js';
+import { routeTemplate } from './access-log.js';
 import { AppError, codeForStatus, isAppError } from './errors.js';
 
 interface HttpLikeError {
@@ -56,22 +60,38 @@ export function normalizeError(error: unknown): AppError {
   return new AppError('INTERNAL_ERROR', 'Internal server error', { cause: error });
 }
 
+/**
+ * Unexpected failures (bugs, unhandled driver errors) are logged at error with
+ * a stack and reported. A deliberate AppError with a 5xx status (a dependency
+ * that is down or not configured) is an operational condition: warn, no stack,
+ * no report — HTTP metrics and alerts on 5xx rates still count it.
+ */
+const isUnexpected = (appError: AppError, original: unknown) =>
+  appError.status >= 500 && (appError.code === 'INTERNAL_ERROR' || !isAppError(original));
+
 function logError(req: Request, appError: AppError, original: unknown): void {
-  const entry = {
-    level: appError.status >= 500 ? 'error' : 'warn',
-    msg: 'request_failed',
-    requestId: getRequestId() ?? req.requestId,
+  const unexpected = isUnexpected(appError, original);
+  const fields = {
     method: req.method,
-    path: req.originalUrl.split('?')[0],
+    route: routeTemplate(req),
     status: appError.status,
     code: appError.code,
-    error:
-      original instanceof Error
-        ? { name: original.name, message: original.message, stack: original.stack }
-        : String(original),
+    ...errorFields(original, unexpected),
   };
-  if (appError.status >= 500) console.error(JSON.stringify(entry));
-  else console.warn(JSON.stringify(entry));
+  const pgCode = (original as { code?: unknown } | null)?.code;
+  if (typeof pgCode === 'string' && /^[0-9A-Z]{5}$/.test(pgCode)) dbErrors.inc({ kind: 'query' });
+  if (unexpected) {
+    logger.error('request_failed', fields);
+    captureError(original, {
+      requestId: getRequestId() ?? req.requestId,
+      route: fields.route,
+      method: req.method,
+      organizationId: req.auth?.organizationId,
+      userId: req.auth?.userId,
+    });
+  } else {
+    logger.warn('request_failed', fields);
+  }
 }
 
 /**
@@ -101,6 +121,18 @@ export function errorHandler(
   const appError = normalizeError(error);
   const requestId = getRequestId() ?? req.requestId;
   if (appError.status >= 500 || !isAppError(error)) logError(req, appError, error);
+  if (appError.status === 401 || /CSRF/.test(appError.message)) {
+    const route = routeTemplate(req);
+    authFailures.inc({
+      reason: /CSRF/.test(appError.message)
+        ? 'csrf'
+        : route.endsWith('/auth/login')
+          ? 'credentials'
+          : route.endsWith('/auth/refresh')
+            ? 'refresh'
+            : 'token',
+    });
+  }
 
   const body: ApiErrorResponse = {
     success: false,

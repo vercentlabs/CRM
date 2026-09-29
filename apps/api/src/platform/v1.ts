@@ -1,4 +1,5 @@
 import type { DatabasePool } from '@crm/database';
+import type { BuildInfo } from '@crm/observability';
 import { API_V1_PREFIX, type ApiMetadata } from '@crm/types';
 import { Router } from 'express';
 import { createHealthRouter } from './health.js';
@@ -17,15 +18,18 @@ export const API_VERSION = '1.0.0';
 export function createV1Router({
   pool,
   modules,
+  build,
 }: {
   pool: Pick<DatabasePool, 'query'>;
   modules: ApiModule[];
+  build?: BuildInfo;
 }): Router {
   const router = Router();
   const metadata: ApiMetadata = {
     name: API_NAME,
     version: API_VERSION,
     openapi: `${API_V1_PREFIX}/openapi.json`,
+    ...(build ? { build: { version: build.version, commit: build.commit } } : {}),
   };
   let openApi: unknown;
 

@@ -5,10 +5,18 @@ import type { Queryable } from '@crm/database';
 export interface OutgoingMessage {
   id: number;
   status: 'Queued' | 'Sending' | 'Sent' | 'Delivered' | 'Failed';
+  /** True while another attempt is inside its send lease (still talking to the provider). */
+  sending_in_progress: boolean;
   message_type: 'SMS' | 'WhatsApp' | 'Email';
   content: string;
   phone: string | null;
 }
+
+/**
+ * Longest time one send attempt may hold a message in 'Sending' (provider
+ * timeout 15s plus margin). Younger 'Sending' rows belong to a live attempt.
+ */
+export const SEND_LEASE_SECONDS = 60;
 
 export async function lockMessage(
   db: Queryable,
@@ -17,6 +25,8 @@ export async function lockMessage(
 ): Promise<OutgoingMessage | null> {
   const result = await db.query(
     `SELECT m.id, m.status, m.message_type, m.content,
+            (m.status = 'Sending' AND m.sending_started_at > now() - make_interval(secs => ${SEND_LEASE_SECONDS}))
+              AS sending_in_progress,
             COALESCE(NULLIF(l.mobile_number, ''), l.alternate_number) AS phone
      FROM messages m
      JOIN leads l ON l.id = m.lead_id AND l.organization_id = m.organization_id
@@ -67,6 +77,22 @@ export async function markFailed(
      WHERE id = $1 AND organization_id = $2 AND status IN ('Queued', 'Sending')`,
     [messageId, organizationId, failure.code.slice(0, 50), failure.message.slice(0, 300)],
   );
+}
+
+/**
+ * Maintenance: messages stuck in 'Sending' past the lease (the worker died
+ * mid-call). The provider may have accepted them, so they are failed as
+ * DELIVERY_UNKNOWN instead of being resent. Platform scan across tenants.
+ */
+export async function failStaleSending(db: Queryable): Promise<number> {
+  const result = await db.query(
+    `UPDATE messages SET status = 'Failed', failed_at = now(), failure_code = 'DELIVERY_UNKNOWN',
+            failure_message = 'A send attempt was interrupted; not resent to avoid a duplicate'
+     WHERE status = 'Sending'
+       AND (sending_started_at IS NULL OR sending_started_at < now() - make_interval(secs => $1))`,
+    [SEND_LEASE_SECONDS],
+  );
+  return result.rowCount ?? 0;
 }
 
 /** Transient provider failure: back to Queued for the next attempt. */

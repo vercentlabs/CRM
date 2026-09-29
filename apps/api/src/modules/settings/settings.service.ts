@@ -1,4 +1,6 @@
 import { withTransaction } from '@crm/database';
+import { isValidTimeZone } from '@crm/validation';
+import { AppError } from '../../platform/http/errors.js';
 import { emailSender } from '../../platform/providers.js';
 import { recordAuditEvent } from '../../platform/audit.js';
 import { pool } from '../../platform/db.js';
@@ -13,6 +15,11 @@ export async function updateSettings(
   values: Record<string, unknown>,
 ): Promise<Record<string, string>> {
   const entries = Object.entries(values);
+  if ('timezone' in values && !isValidTimeZone(values.timezone)) {
+    throw AppError.validation([
+      { field: 'timezone', message: 'Time zone must be an IANA name such as Asia/Kolkata' },
+    ]);
+  }
   await withTransaction(pool, async (client) => {
     for (const [key, value] of entries)
       await settings.upsert(client, actor, key, JSON.stringify(value));

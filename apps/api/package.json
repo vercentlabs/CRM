@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "org:bootstrap": "node dist/cli/bootstrap-organization.js",
-    "org:bootstrap:dev": "tsx src/cli/bootstrap-organization.ts"
+    "org:bootstrap:dev": "tsx src/cli/bootstrap-organization.ts",
+    "plivo:check": "node dist/cli/plivo-check.js"
   },
   "keywords": [],
   "author": "",
@@ -21,6 +22,10 @@
   "dependencies": {
     "@crm/config": "workspace:*",
     "@crm/database": "workspace:*",
+    "@crm/entitlements": "workspace:*",
+    "@crm/events": "workspace:*",
+    "@crm/integrations": "workspace:*",
+    "@crm/observability": "workspace:*",
     "@crm/permissions": "workspace:*",
     "@crm/types": "workspace:*",
     "@crm/validation": "workspace:*",
@@ -29,13 +34,12 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "helmet": "^8.3.0",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^1.4.5-lts.1",
     "plivo": "^4.0.0",
-    "zod": "^4.6.5",
-    "@crm/events": "workspace:*",
-    "@crm/entitlements": "workspace:*",
-    "@crm/integrations": "workspace:*"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@seriousme/openapi-schema-validator": "^2.11.0",

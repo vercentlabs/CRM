@@ -36,6 +36,11 @@ const COUNTED = [
   'audit_logs',
 ] as const;
 
+/** Rows that later additive migrations introduce by design (0008: one admin grant). */
+const ADDED_LATER: Partial<Record<string, string>> = {
+  role_permissions: " WHERE permission_key <> 'settings.integrations.manage'",
+};
+
 describe.skipIf(!hasTestDatabase)('migrations 0005–0007 upgrade (0004 → latest)', () => {
   let db: TestSchema;
   let server: TestServer;
@@ -71,7 +76,10 @@ describe.skipIf(!hasTestDatabase)('migrations 0005–0007 upgrade (0004 → late
   it('preserves every record, including historical sent messages and pending resets', async () => {
     for (const table of COUNTED) {
       expect(
-        Number((await db.pool.query(`SELECT count(*) FROM ${table}`)).rows[0].count),
+        Number(
+          (await db.pool.query(`SELECT count(*) FROM ${table}${ADDED_LATER[table] ?? ''}`)).rows[0]
+            .count,
+        ),
         table,
       ).toBe(before[table]);
     }

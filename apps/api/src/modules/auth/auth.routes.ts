@@ -14,11 +14,10 @@ import {
 } from '../../platform/auth/cookies.js';
 import { resolveAuth } from '../../platform/auth/middleware.js';
 import * as sessions from '../../platform/auth/service.js';
-import { env } from '../../platform/env.js';
 import { AppError } from '../../platform/http/errors.js';
 import { sendData } from '../../platform/http/respond.js';
 import { controller, ok, type ApiModule } from '../../platform/http/route.js';
-import { createRateLimiter, emailKey } from '../../platform/rate-limit.js';
+import { policies, rateLimit } from '../../platform/rate-limit.js';
 import * as passwords from './password.service.js';
 
 /**
@@ -28,25 +27,9 @@ import * as passwords from './password.service.js';
  * (Phase 2 contract).
  */
 
-export const loginRateLimiter = createRateLimiter({
-  name: 'login',
-  max: env.AUTH_RATE_LIMIT_MAX,
-  windowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
-  key: emailKey,
-});
-
-export const refreshRateLimiter = createRateLimiter({
-  name: 'refresh',
-  max: env.AUTH_RATE_LIMIT_MAX * 6,
-  windowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
-});
-
-export const passwordResetLimiter = createRateLimiter({
-  name: 'password-reset',
-  max: env.AUTH_RATE_LIMIT_MAX,
-  windowSeconds: env.AUTH_RATE_LIMIT_WINDOW_SECONDS,
-  key: emailKey,
-});
+const loginLimit = rateLimit(policies.loginAccount, policies.loginIp);
+const refreshLimit = rateLimit(policies.refresh);
+const passwordResetLimit = rateLimit(policies.passwordReset, policies.passwordResetIp);
 
 type Delivery = 'cookie' | 'body';
 
@@ -199,7 +182,12 @@ const sessionSchema = z.object({
     email: z.string(),
     name: z.string(),
   }),
-  organization: z.object({ id: z.uuid(), name: z.string(), slug: z.string() }),
+  organization: z.object({
+    id: z.uuid(),
+    name: z.string(),
+    slug: z.string(),
+    timezone: z.string(),
+  }),
   membership: z.object({ id: z.number(), role: z.object({ key: z.string(), name: z.string() }) }),
   permissions: z.record(z.string(), z.enum(['own', 'organization'])),
   organizations: z.array(z.unknown()),
@@ -221,7 +209,7 @@ export const authModule: ApiModule = {
       summary: "Sign in ('web' → HttpOnly cookies, 'mobile' → tokens in body)",
       tags,
       auth: 'public',
-      before: [loginRateLimiter],
+      before: [loginLimit],
       controller: login,
       response: sessionSchema,
     },
@@ -231,7 +219,7 @@ export const authModule: ApiModule = {
       summary: 'Rotate the refresh token (cookie or body `refreshToken`)',
       tags,
       auth: 'public',
-      before: [refreshRateLimiter],
+      before: [refreshLimit],
       controller: refresh,
       response: sessionSchema,
     },
@@ -266,7 +254,7 @@ export const authModule: ApiModule = {
       summary: 'Request a reset link (never reveals whether the email exists)',
       tags,
       auth: 'public',
-      before: [passwordResetLimiter],
+      before: [passwordResetLimit],
       controller: forgotPassword,
       response: z.object({ requested: z.literal(true) }),
     },
@@ -276,7 +264,7 @@ export const authModule: ApiModule = {
       summary: 'Reset the password with a token (revokes all sessions)',
       tags,
       auth: 'public',
-      before: [passwordResetLimiter],
+      before: [passwordResetLimit],
       controller: resetPassword,
       response: z.object({ reset: z.literal(true) }),
     },
@@ -286,7 +274,7 @@ export const authModule: ApiModule = {
       summary: 'Check a reset token',
       tags,
       auth: 'public',
-      before: [passwordResetLimiter],
+      before: [passwordResetLimit],
       controller: verifyResetToken,
       response: z.object({ valid: z.literal(true) }),
     },

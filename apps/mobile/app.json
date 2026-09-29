@@ -27,7 +27,6 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "usesCleartextTraffic": true,
       "package": "com.vincentvalore.crmmobile"
     },
     "web": {

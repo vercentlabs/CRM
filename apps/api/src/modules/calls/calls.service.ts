@@ -1,13 +1,22 @@
 import { withTransaction } from '@crm/database';
+import { plivoCallbackUrls } from '@crm/integrations';
 import type { Call } from '@crm/types';
 import type { endCallSchema } from '@crm/validation';
 import type { z } from 'zod';
 import { plivoTelephony, type Telephony } from '../../integrations/plivo.js';
 import { pool } from '../../platform/db.js';
+import { env } from '../../platform/env.js';
 import { AppError } from '../../platform/http/errors.js';
 import { ownerFilter, type Actor } from '../../platform/tenancy.js';
 import * as leads from '../leads/leads.repository.js';
 import * as calls from './calls.repository.js';
+
+/** Answer and hangup callbacks for a new call (validated PLIVO_WEBHOOK_URL). */
+const callbackUrls = () => {
+  if (!env.PLIVO_WEBHOOK_URL) throw new Error('PLIVO_WEBHOOK_URL is not configured');
+  const urls = plivoCallbackUrls(env.PLIVO_WEBHOOK_URL);
+  return { answerUrl: urls.answer, hangupUrl: urls.status };
+};
 
 let telephony: Telephony = plivoTelephony;
 
@@ -45,9 +54,9 @@ export async function initiateCall(
   const callId = await calls.insertScheduled(pool, actor, leadId, actor.userId);
   try {
     const { callUuid } = await telephony.dial({
-      from: process.env.PLIVO_PHONE_NUMBER,
+      from: env.PLIVO_PHONE_NUMBER,
       to: phone,
-      answerUrl: `${process.env.PLIVO_WEBHOOK_URL}/answer`,
+      ...callbackUrls(),
       metadata: { callId, leadId, userId: actor.userId },
     });
     await calls.setProviderCallId(pool, actor, callId, callUuid);

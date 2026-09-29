@@ -217,3 +217,19 @@ describe('error mapping', () => {
     expect(screen.getByText('Try again')).toBeTruthy();
   });
 });
+
+describe('organization time zone', () => {
+  it('formats dates in the active organization zone with a safe fallback', () => {
+    const format = require('../src/lib/format') as typeof import('../src/lib/format');
+    format.setDisplayTimeZone('Asia/Kolkata');
+    expect(format.displayTimeZone()).toBe('Asia/Kolkata');
+    const kolkata = format.formatDateTime('2026-07-01T18:45:00Z');
+    format.setDisplayTimeZone('America/New_York');
+    const newYork = format.formatDateTime('2026-07-01T18:45:00Z');
+    expect(kolkata).not.toBe(newYork);
+    expect(kolkata).toMatch(/Jul 2, 2026|2 Jul 2026/);
+    expect(newYork).toMatch(/Jul 1, 2026|1 Jul 2026/);
+    format.setDisplayTimeZone('Not/AZone');
+    expect(format.displayTimeZone()).toBe('UTC');
+  });
+});

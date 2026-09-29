@@ -1,5 +1,6 @@
 import { ZodError } from 'zod';
 import { errorInfo } from '../logger.js';
+import { jobDuration, jobFailures, jobRetries } from '../metrics.js';
 import * as communications from '../processors/communications.js';
 import * as maintenance from '../processors/maintenance.js';
 import * as notifications from '../processors/notifications.js';
@@ -24,7 +25,9 @@ export const HANDLERS: { [N in JobName]: Handler<N> } = {
   'webhook.deliver': webhooks.deliver,
   'file.delete_object': maintenance.deleteFileObject,
   'reminders.scan': (deps) => notifications.scanReminders(deps),
-  'maintenance.sweep': (deps) => maintenance.sweep(deps),
+  'maintenance.sweep': async (deps) => {
+    await maintenance.sweep(deps);
+  },
 };
 
 /**
@@ -65,6 +68,7 @@ export function createJobRunner(deps: WorkerDeps): JobRunner {
     };
     try {
       await (HANDLERS[job.name] as Handler<JobName>)(deps, payload, ctx);
+      jobDuration.observe({ job_name: job.name, result: 'ok' }, (Date.now() - started) / 1000);
       deps.logger.info('job_completed', {
         ...fields,
         durationMs: Date.now() - started,
@@ -72,6 +76,13 @@ export function createJobRunner(deps: WorkerDeps): JobRunner {
       });
     } catch (error) {
       const permanent = error instanceof PermanentJobError;
+      const terminal = permanent || ctx.finalAttempt;
+      jobDuration.observe(
+        { job_name: job.name, result: terminal ? 'failed' : 'retry' },
+        (Date.now() - started) / 1000,
+      );
+      if (terminal) jobFailures.inc({ job_name: job.name });
+      else jobRetries.inc({ job_name: job.name });
       deps.logger[permanent || ctx.finalAttempt ? 'error' : 'warn']('job_failed', {
         ...fields,
         durationMs: Date.now() - started,

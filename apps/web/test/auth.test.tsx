@@ -112,7 +112,12 @@ function TenantData() {
 describe('organization switching', () => {
   it('drops every cached query of the previous organization and scopes keys by organization', async () => {
     const beta = makeSession(ADMIN, {
-      organization: { id: '22222222-2222-4222-8222-222222222222', name: 'Beta Ltd', slug: 'beta' },
+      organization: {
+        id: '22222222-2222-4222-8222-222222222222',
+        name: 'Beta Ltd',
+        slug: 'beta',
+        timezone: 'Asia/Kolkata',
+      },
       csrfToken: 'csrf-beta',
     });
     const api = mockApi().on('POST /api/v1/auth/switch-organization', ok(beta));

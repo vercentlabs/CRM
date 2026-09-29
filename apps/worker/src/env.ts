@@ -2,6 +2,16 @@ import { booleanString, nodeEnvSchema, parseEnv } from '@crm/config';
 import { z } from 'zod';
 
 const optional = z.string().optional();
+
+/** localhost or a single-label host (compose/private-network service name). */
+const isPrivateHost = (url: string) => {
+  try {
+    const host = new URL(url).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || !host.includes('.');
+  } catch {
+    return false;
+  }
+};
 const int = (min: number, fallback: number) => z.coerce.number().int().min(min).default(fallback);
 
 /**
@@ -13,6 +23,19 @@ const workerEnvSchema = z
   .object({
     NODE_ENV: nodeEnvSchema,
     DATABASE_URL: z.string(),
+    /** disable | require (TLS, no certificate check) | verify (TLS + certificate check; production default). */
+    DATABASE_SSL: z.enum(['disable', 'require', 'verify']).optional(),
+    DATABASE_SSL_CA: optional,
+    LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+    /** Bearer token for GET /metrics on WORKER_HEALTH_PORT (unset = disabled). */
+    METRICS_TOKEN: optional,
+
+    /** Retention of operational records (business records are never purged). */
+    SESSION_RETENTION_DAYS: int(1, 30),
+    PASSWORD_RESET_RETENTION_DAYS: int(1, 7),
+    NOTIFICATION_RETENTION_DAYS: int(7, 180),
+    DELIVERY_RETENTION_DAYS: int(7, 90),
+    DELETED_FILE_RETENTION_DAYS: int(7, 90),
 
     /** BullMQ backend. Required in production; without it jobs run inline (dev/test). */
     REDIS_URL: optional,
@@ -81,6 +104,18 @@ const workerEnvSchema = z
         issue('SMS_PROVIDER', 'The log SMS provider is for development only');
       if (env.STORAGE_PROVIDER === 'memory')
         issue('STORAGE_PROVIDER', 'In-memory storage is for development only');
+      if (env.METRICS_TOKEN !== undefined && env.METRICS_TOKEN.length < 24) {
+        issue('METRICS_TOKEN', 'Must be at least 24 characters');
+      }
+      if (env.DATABASE_SSL === 'disable' && !isPrivateHost(env.DATABASE_URL)) {
+        issue('DATABASE_SSL', 'TLS must not be disabled for a remote production database');
+      }
+      if (!env.WEBHOOK_SECRET_KEY) {
+        issue('WEBHOOK_SECRET_KEY', 'Required in production (outbound webhook signing)');
+      }
+      if (!env.FRONTEND_URL || !/^https:\/\//.test(env.FRONTEND_URL)) {
+        issue('FRONTEND_URL', 'An https:// URL is required in production (links in emails)');
+      }
       if (env.WEBHOOK_ALLOW_PRIVATE_TARGETS) {
         issue(
           'WEBHOOK_ALLOW_PRIVATE_TARGETS',
@@ -108,4 +143,12 @@ export type WorkerEnv = z.output<typeof workerEnvSchema>;
 
 export function loadWorkerEnv(source: Record<string, string | undefined> = process.env): WorkerEnv {
   return parseEnv(workerEnvSchema, { appName: 'worker', source });
+}
+
+/** TLS settings for pg: production defaults to verified TLS; development/test to none. */
+export function databaseSsl(env: WorkerEnv): false | { rejectUnauthorized: boolean; ca?: string } {
+  const mode = env.DATABASE_SSL ?? (env.NODE_ENV === 'production' ? 'verify' : 'disable');
+  if (mode === 'disable') return false;
+  if (mode === 'require') return { rejectUnauthorized: false };
+  return { rejectUnauthorized: true, ...(env.DATABASE_SSL_CA ? { ca: env.DATABASE_SSL_CA } : {}) };
 }

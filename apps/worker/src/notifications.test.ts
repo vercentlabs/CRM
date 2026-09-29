@@ -129,6 +129,43 @@ describe.skipIf(!hasTestDatabase)('notifications and reminders (PostgreSQL)', ()
     expect((await rows()).filter((r) => r.type === 'followup.due')).toHaveLength(2);
   });
 
+  it('renders reminder due times in the organization time zone (invalid zone → UTC)', async () => {
+    const { deps } = testDeps(db.pool);
+    await db.pool.query(`DELETE FROM notifications`);
+    await db.pool.query(`UPDATE tasks SET status = 'completed' WHERE id = $1`, [fx.taskA]);
+    await db.pool.query(
+      `INSERT INTO settings (organization_id, key, value) VALUES ($1, 'timezone', '"Asia/Kolkata"'),
+         ($2, 'timezone', '"Bogus/Zone"')
+       ON CONFLICT (organization_id, key) DO UPDATE SET value = EXCLUDED.value`,
+      [fx.orgA, fx.orgB],
+    );
+    const due = (
+      await db.pool.query(
+        `UPDATE leads SET next_call_at = date_trunc('minute', now()) + interval '10 minutes'
+         WHERE id IN ($1, $2) RETURNING id, next_call_at::timestamptz AS next_call_at`,
+        [fx.leadA, fx.leadB],
+      )
+    ).rows;
+    await notifications.scanReminders(deps);
+    const expected = (at: Date, zone: string) => {
+      const part = (options: Intl.DateTimeFormatOptions) =>
+        new Intl.DateTimeFormat('en-US', { timeZone: zone, ...options }).format(at);
+      const time = part({ hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+      return `${part({ day: '2-digit' })} ${part({ month: 'short' })} ${part({ year: 'numeric' })}, ${time} ${zone}`;
+    };
+    const bodies = Object.fromEntries(
+      (await rows())
+        .filter((r) => r.type === 'followup.due')
+        .map((r) => [r.organization_id, r.body]),
+    );
+    const at = (id: number) => due.find((r) => r.id === id).next_call_at as Date;
+    expect(bodies[fx.orgA]).toBe(`Alpha Lead · ${expected(at(fx.leadA), 'Asia/Kolkata')}`);
+    expect(bodies[fx.orgB]).toBe(`Beta Lead · ${expected(at(fx.leadB), 'UTC')}`);
+    await db.pool.query(`DELETE FROM settings WHERE key = 'timezone'`);
+    await db.pool.query(`UPDATE tasks SET status = 'pending' WHERE id = $1`, [fx.taskA]);
+    await db.pool.query(`DELETE FROM notifications`);
+  });
+
   it('skips completed tasks and suspended members', async () => {
     const { deps } = testDeps(db.pool);
     await db.pool.query(`UPDATE leads SET next_call_at = NULL`);

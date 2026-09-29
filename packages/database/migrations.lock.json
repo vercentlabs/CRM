@@ -1,0 +1,10 @@
+{
+  "0001_baseline_schema.sql": "e79de9113eac0978cc7d74121f257621445fb6681e1ed8e35e75d795c3374996",
+  "0002_saas_identity.sql": "1f2cd51f95d89541f7480b2874528e01f9163c921893db65fbcd1c28bbeff365",
+  "0003_tenant_ownership.sql": "105ef2bdb8874babe748dc69def018a45c97ed414a6a0f1a54ca624d58b2a8ce",
+  "0004_remove_legacy_role_id.sql": "69816baa1a49fe360c252e347a794088d53dec8b3bab8858443385b48bb4ecdd",
+  "0005_outbox_notifications_delivery.sql": "5b9ca03071955c8165ef3e96c42b6bc9bc27d7ed63abc0d7bf0891db7cfdee71",
+  "0006_files_webhooks.sql": "ff4a263ce1bddfe5869e2bf5a7ea9b8237f30c96caaa842f92d03b8157a3ca92",
+  "0007_plans_entitlements.sql": "1487847c663ee451fe945f678063cb0c1ed63cf12ec79b051ca62c7fb63c4238",
+  "0008_integrations_permission.sql": "e9330440b2b543e7090ab8115862917449527e15932542c090824c69a83eeb79"
+}

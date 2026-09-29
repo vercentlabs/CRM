@@ -2,6 +2,12 @@ import type { Queryable } from '@crm/database';
 import type { ChatMessage, ChatParticipant, Conversation } from '@crm/types';
 import type { Tenant } from '../../platform/tenancy.js';
 
+/** Message row plus the tracked attachment (if any) needed to sign its URL. */
+export type ChatMessageRow = ChatMessage & {
+  file_id: string | null;
+  file_provider_id: string | null;
+};
+
 /**
  * Internal team chat. Tenancy is derived from chat_conversations.organization_id;
  * participants/messages are always reached through a conversation of the
@@ -62,14 +68,17 @@ export async function listMessages(
   db: Queryable,
   tenant: Tenant,
   conversationId: number,
-): Promise<ChatMessage[]> {
+): Promise<ChatMessageRow[]> {
   const result = await db.query(
     `SELECT cm.id, cm.conversation_id, cm.sender_id, cm.content, cm.message_type, cm.attachment_url, cm.file_type,
             cm.is_read, cm.created_at,
-            u.full_name AS sender_name, u.username AS sender_username
+            u.full_name AS sender_name, u.username AS sender_username,
+            f.public_id AS file_id, f.provider_file_id AS file_provider_id
      FROM chat_messages cm
      JOIN chat_conversations c ON c.id = cm.conversation_id AND c.organization_id = $2
      JOIN users u ON u.id = cm.sender_id
+     LEFT JOIN files f ON f.organization_id = c.organization_id AND f.entity_type = 'chat_message'
+                      AND f.entity_id = cm.id AND f.status = 'attached'
      WHERE cm.conversation_id = $1
      ORDER BY cm.created_at ASC, cm.id ASC`,
     [conversationId, tenant.organizationId],
@@ -81,14 +90,17 @@ export async function findMessage(
   db: Queryable,
   tenant: Tenant,
   messageId: number,
-): Promise<ChatMessage | null> {
+): Promise<ChatMessageRow | null> {
   const result = await db.query(
     `SELECT cm.id, cm.conversation_id, cm.sender_id, cm.content, cm.message_type, cm.attachment_url, cm.file_type,
             cm.is_read, cm.created_at,
-            u.full_name AS sender_name, u.username AS sender_username
+            u.full_name AS sender_name, u.username AS sender_username,
+            f.public_id AS file_id, f.provider_file_id AS file_provider_id
      FROM chat_messages cm
      JOIN chat_conversations c ON c.id = cm.conversation_id AND c.organization_id = $2
      JOIN users u ON u.id = cm.sender_id
+     LEFT JOIN files f ON f.organization_id = c.organization_id AND f.entity_type = 'chat_message'
+                      AND f.entity_id = cm.id AND f.status = 'attached'
      WHERE cm.id = $1`,
     [messageId, tenant.organizationId],
   );

@@ -11,6 +11,32 @@ function jsonResponse(status: number, body: unknown) {
 type Call = [string, RequestInit & { headers: Record<string, string> }];
 
 describe('v1 resources', () => {
+  it('exposes outbound webhook management under /api/v1/webhooks', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { success: true, data: {} }));
+    const client = createApiClient({
+      baseUrl: 'http://api.test',
+      getToken: () => 't',
+      fetch: fetchMock as unknown as typeof fetch,
+    });
+    await client.v1.webhooks.list();
+    await client.v1.webhooks.eventTypes();
+    await client.v1.webhooks.create({ url: 'https://h.example.com', events: ['lead.created'] });
+    await client.v1.webhooks.update('w1', { active: false });
+    await client.v1.webhooks.rotateSecret('w1');
+    await client.v1.webhooks.remove('w1');
+    const calls = (fetchMock.mock.calls as unknown as Call[]).map(
+      ([url, init]) => `${init.method} ${url}`,
+    );
+    expect(calls).toEqual([
+      'GET http://api.test/api/v1/webhooks',
+      'GET http://api.test/api/v1/webhooks/event-types',
+      'POST http://api.test/api/v1/webhooks',
+      'PATCH http://api.test/api/v1/webhooks/w1',
+      'POST http://api.test/api/v1/webhooks/w1/rotate-secret',
+      'DELETE http://api.test/api/v1/webhooks/w1',
+    ]);
+  });
+
   it('exposes notifications, entitlements and file deletion under /api/v1', async () => {
     const pagination = { page: 1, limit: 20, total: 0, totalPages: 1 };
     const fetchMock = vi.fn(async () =>

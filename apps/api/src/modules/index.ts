@@ -19,6 +19,7 @@ import { organizationsModule } from './organizations/organizations.routes.js';
 import { reportsModule } from './reports/reports.routes.js';
 import { settingsModule } from './settings/settings.routes.js';
 import { calendarModule, tasksModule } from './tasks/tasks.routes.js';
+import { webhooksModule } from './webhooks/webhooks.routes.js';
 
 /** Every `/api/v1` module. The registry drives routing and the OpenAPI document. */
 export const apiModules: ApiModule[] = [
@@ -41,6 +42,7 @@ export const apiModules: ApiModule[] = [
   auditModule,
   marketModule,
   notificationsModule,
+  webhooksModule,
 ];
 
 /** Provider webhooks: stable, signature-verified URLs outside /api/v1 (not deprecated). */

@@ -110,3 +110,28 @@ export async function clearChatAttachment(
     [tenant.organizationId, messageId, url],
   );
 }
+
+/**
+ * A live file the user may read: the uploader, or a participant of the
+ * conversation whose message carries it. Anything else (other tenant, other
+ * member, deleted, unknown id) is indistinguishable: null.
+ */
+export async function findReadable(
+  db: Queryable,
+  tenant: Tenant,
+  publicId: string,
+  userId: number,
+): Promise<FileRow | null> {
+  const result = await db.query(
+    `SELECT ${COLUMNS} FROM files f
+     WHERE f.organization_id = $1 AND f.public_id::text = $2 AND f.status <> 'deleted'
+       AND (f.uploaded_by = $3 OR (
+         f.entity_type = 'chat_message' AND EXISTS (
+           SELECT 1 FROM chat_messages cm
+           JOIN chat_conversations c ON c.id = cm.conversation_id AND c.organization_id = f.organization_id
+           JOIN chat_participants p ON p.conversation_id = cm.conversation_id AND p.user_id = $3
+           WHERE cm.id = f.entity_id)))`,
+    [tenant.organizationId, publicId, userId],
+  );
+  return result.rows[0] ?? null;
+}

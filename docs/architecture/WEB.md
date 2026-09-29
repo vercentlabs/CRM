@@ -30,7 +30,9 @@ packages/ui/           @crm/ui design system (tokens + primitives)
 - **Forms** use React Hook Form with the shared `@crm/validation` schemas (`useZodForm`), so browser and API validate identically. `applyServerErrors` maps API `details` (for example `body.email`) onto fields. Sheets mount their form only while open, so each opening starts fresh, and the submit button is disabled while saving. `datetime-local` values are sent as ISO instants (`toIsoOrNull`).
 - **Lists** use `DataTable` (server sort via allowlisted fields, pagination, skeleton, empty and error states, horizontal scroll on small screens). Search, filters, sort and page live in the URL (`useListParams`).
 - **Errors**: `ApiErrorState` distinguishes 403 (permission denied) from 404 (not found, which also covers other organizations' records) from everything else. Other errors show a retry and the request id. 5xx messages are never shown verbatim.
-- **Dates** are shown in the viewer's locale and time zone (`lib/format.ts`). The organization's `timezone` setting is not applied yet, because only administrators can read settings.
+- **Dates** are shown in the viewer's locale and the **organization's time zone** (`lib/format.ts`, zone set by `SessionProvider` from `session.organization.timezone`; UTC fallback). `datetime-local`/`date` inputs are read and written in the same zone (DST gaps shift forward, overlaps take the first occurrence).
+- **Security headers** (`security-headers.ts`, applied in `next.config.ts`): CSP (`script-src 'self' 'unsafe-inline'` for App Router hydration; `connect-src` self + API origin), HSTS in production, `X-Frame-Options: DENY`, `nosniff`, referrer and permissions policies.
+- **Settings → Webhooks** (`modules/settings/WebhooksSettings.tsx`, `settings.integrations.manage`): add/disable/delete endpoints and rotate secrets; the signing secret is shown once in a dialog and never stored.
 
 ## Design system (`@crm/ui`)
 

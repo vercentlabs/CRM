@@ -180,9 +180,9 @@ describe('forms', () => {
     ).toBe('A customer with this email already exists');
   });
 
-  it('sends local date inputs as ISO instants', () => {
+  it('sends date inputs (organization wall-clock time, UTC by default) as ISO instants', () => {
     const iso = toIsoOrNull('2026-10-01T09:30');
-    expect(iso).toBe(new Date('2026-10-01T09:30').toISOString());
+    expect(iso).toBe('2026-10-01T09:30:00.000Z');
     expect(toDateTimeInput(iso)).toBe('2026-10-01T09:30');
     expect(toIsoOrNull('')).toBeNull();
   });

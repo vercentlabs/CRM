@@ -14,7 +14,8 @@
   },
   "files": [
     "dist",
-    "migrations"
+    "migrations",
+    "migrations.lock.json"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -23,7 +24,8 @@
     "test": "vitest run",
     "migrate": "node dist/cli/migrate.js up",
     "migrate:status": "node dist/cli/migrate.js status",
-    "migrate:baseline": "node dist/cli/migrate.js baseline"
+    "migrate:baseline": "node dist/cli/migrate.js baseline",
+    "migrations:lock": "node scripts/migrations-lock.mjs"
   },
   "dependencies": {
     "pg": "^8.16.3"

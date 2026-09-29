@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import ImageKit from 'imagekit';
 import { ProviderError, isPermanentStatus, safeMessage, withTimeout } from './errors.js';
 
@@ -28,6 +28,11 @@ export interface FileStorage {
   }): Promise<StoredObject>;
   /** Idempotent: deleting a missing object succeeds. */
   delete(providerFileId: string): Promise<void>;
+  /**
+   * Short-lived URL for reading the object. Only issued by the API after an
+   * authorization check; it expires after `expiresInSeconds`.
+   */
+  signedUrl(object: { url: string; providerFileId: string }, expiresInSeconds: number): string;
 }
 
 export interface ImageKitConfig {
@@ -78,6 +83,10 @@ export function createImageKitStorage(config: ImageKitConfig): FileStorage {
         );
       }
     },
+    signedUrl(object, expiresInSeconds) {
+      // Enforced by ImageKit once "Restrict unsigned URLs" is enabled on the account (operator action).
+      return sdk().url({ src: object.url, signed: true, expireSeconds: expiresInSeconds });
+    },
     async delete(providerFileId) {
       try {
         await withTimeout(sdk().deleteFile(providerFileId), timeoutMs, 'ImageKit delete');
@@ -99,11 +108,35 @@ export function createImageKitStorage(config: ImageKitConfig): FileStorage {
 }
 
 /** In-process storage for development and tests (never used when NODE_ENV=production). */
-export function createMemoryStorage(): FileStorage & { objects: Map<string, Buffer> } {
+export function createMemoryStorage(
+  options: { signingSecret?: string; now?: () => number } = {},
+): FileStorage & {
+  objects: Map<string, Buffer>;
+  /** Mirrors provider-side enforcement: true only for an unexpired, untampered signed URL. */
+  verifySignedUrl(url: string): boolean;
+} {
   const objects = new Map<string, Buffer>();
+  const secret = options.signingSecret ?? randomBytes(32).toString('hex');
+  const now = options.now ?? Date.now;
+  const sign = (base: string, expires: number) =>
+    createHmac('sha256', secret).update(`${base}\n${expires}`).digest('hex');
   return {
     provider: 'memory',
     objects,
+    signedUrl(object, expiresInSeconds) {
+      const expires = Math.floor(now() / 1000) + expiresInSeconds;
+      return `${object.url}?expires=${expires}&signature=${sign(object.url, expires)}`;
+    },
+    verifySignedUrl(url) {
+      const match = /^(.*)\?expires=(\d+)&signature=([0-9a-f]{64})$/.exec(url);
+      if (!match) return false;
+      const [, base, rawExpires, signature] = match as unknown as [string, string, string, string];
+      const expires = Number(rawExpires);
+      if (expires * 1000 <= now()) return false;
+      const expected = Buffer.from(sign(base, expires));
+      const given = Buffer.from(signature);
+      return expected.length === given.length && timingSafeEqual(expected, given);
+    },
     async put({ buffer, folder, name }) {
       const id = randomUUID();
       objects.set(id, buffer);

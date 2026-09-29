@@ -63,7 +63,7 @@ export const ALL_PERMISSIONS: AuthSessionView['permissions'] = Object.fromEntrie
 export function makeSession(overrides: Partial<AuthSessionView> = {}): AuthSessionView {
   return {
     user: { id: 7, email: 'asha@example.com', name: 'Asha Rao' },
-    organization: ORG_A,
+    organization: { ...ORG_A, timezone: 'UTC' },
     membership: { id: 70, role: { key: 'admin', name: 'Admin' } },
     permissions: ALL_PERMISSIONS,
     organizations: [

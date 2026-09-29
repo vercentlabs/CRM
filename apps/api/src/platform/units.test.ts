@@ -3,7 +3,13 @@ import express from 'express';
 import { describe, expect, it, vi } from 'vitest';
 import { redactAuditValues } from './audit.js';
 import { errorHandler } from './http/error-handler.js';
-import { createRateLimiter } from './rate-limit.js';
+import {
+  createMemoryStore,
+  createRedisStore,
+  rateLimit,
+  useRateLimitStore,
+  type RateLimitStore,
+} from './rate-limit.js';
 
 describe('audit redaction', () => {
   it('removes credentials and tokens at any depth', () => {
@@ -24,11 +30,13 @@ describe('audit redaction', () => {
 
 describe('rate limiter', () => {
   it('blocks after the configured attempts per key and reports Retry-After', async () => {
-    const limiter = createRateLimiter({
+    const store = createMemoryStore();
+    useRateLimitStore(store);
+    const limiter = rateLimit({
       name: 'test',
       max: 2,
       windowSeconds: 60,
-      key: (req) => String(req.body?.email),
+      key: (req) => [String(req.body?.email)],
     });
     const app = express();
     app.use(express.json());
@@ -52,7 +60,7 @@ describe('rate limiter', () => {
       expect(blocked.status).toBe(429);
       expect(blocked.headers.get('retry-after')).toBeTruthy();
       expect((await post('b@x.test')).status).toBe(200);
-      limiter.reset();
+      await store.reset();
       expect((await post('a@x.test')).status).toBe(200);
       warn.mockRestore();
     } finally {
@@ -60,3 +68,81 @@ describe('rate limiter', () => {
     }
   });
 });
+
+describe.skipIf(!process.env.REDIS_TEST_URL)(
+  'rate limiter (Redis, shared across instances)',
+  () => {
+    const serve = async (store: RateLimitStore) => {
+      const app = express();
+      app.use(express.json());
+      app.post(
+        '/login',
+        (req, res, next) => {
+          useRateLimitStore(store);
+          next();
+        },
+        rateLimit({
+          name: 'redis_it',
+          max: 3,
+          windowSeconds: 60,
+          key: (req) => [String(req.body?.email)],
+        }),
+        (_req, res) => res.json({ ok: true }),
+      );
+      app.use(errorHandler);
+      const server = await new Promise<import('node:http').Server>((resolve) => {
+        const s = app.listen(0, '127.0.0.1', () => resolve(s));
+      });
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/login`;
+      return {
+        post: (email: string) =>
+          fetch(url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email }),
+          }),
+        close: () => new Promise((resolve) => server.close(resolve)),
+      };
+    };
+
+    it('counts attempts across API instances, stores only hashed keys and fails closed', async () => {
+      const prefix = `it${Date.now()}`;
+      const a = createRedisStore(process.env.REDIS_TEST_URL!, prefix);
+      const b = createRedisStore(process.env.REDIS_TEST_URL!, prefix);
+      const one = await serve(a);
+      const two = await serve(b);
+      const error = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        expect((await one.post('victim@x.test')).status).toBe(200);
+        expect((await two.post('victim@x.test')).status).toBe(200);
+        expect((await one.post('victim@x.test')).status).toBe(200);
+        const blocked = await two.post('victim@x.test');
+        expect(blocked.status).toBe(429);
+        expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
+        expect((await one.post('other@x.test')).status).toBe(200);
+
+        const { Redis } = await import('ioredis');
+        const raw = new Redis(process.env.REDIS_TEST_URL!);
+        const keys = await raw.keys(`${prefix}:*`);
+        await raw.quit();
+        expect(keys.length).toBeGreaterThan(0);
+        expect(keys.join()).not.toContain('victim');
+        for (const key of keys) expect(key).toMatch(/^[^:]+:rl:redis_it:[A-Za-z0-9_-]{20,}$/);
+
+        // Redis unavailable → 503, never an unlimited pass-through.
+        const down = createRedisStore('redis://127.0.0.1:1', prefix);
+        const three = await serve(down);
+        const res = await three.post('victim@x.test');
+        expect(res.status).toBe(503);
+        await three.close();
+        await down.close();
+      } finally {
+        error.mockRestore();
+        await one.close();
+        await two.close();
+        await a.close();
+        await b.close();
+      }
+    });
+  },
+);

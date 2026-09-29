@@ -84,9 +84,10 @@ worker: outbox relay (SKIP LOCKED lease) ◄─────────┘
   - Chat messages attach a file by `file_id`; the server takes the URL and type from the file record, and only the uploader can attach it, once.
   - `DELETE /files/:id` (uploader or organization manager) marks the metadata deleted, releases storage usage, detaches the chat message and emits `file.deleted`. The worker then removes the provider object, with retries.
   - Historical chat attachment URLs (before Phase 6) are left untouched.
+- **Access (Phase 7):** reads never expose the stored URL of a tracked file. Chat message reads return a short-lived signed `attachment_url` (`FileStorage.signedUrl`, `FILE_URL_TTL_SECONDS`), and `GET /files/:id/url` issues a fresh one to the uploader or a participant of the conversation (everything else: identical 404). Provider-side enforcement needs ImageKit "Restrict unsigned URLs" (operator action).
 - **Storage** sits behind `FileStorage` (`@crm/integrations`): ImageKit, plus in-memory for development and tests. An S3-compatible adapter would implement the same interface.
 
-## Outbound webhooks (foundation)
+## Outbound webhooks
 
 - **Tables:** `webhook_endpoints` (per organization, subscribed event types, AES-256-GCM encrypted secret under `WEBHOOK_SECRET_KEY`) and `webhook_deliveries` (one per endpoint + event).
 - **Delivery:**
@@ -94,7 +95,15 @@ worker: outbox relay (SKIP LOCKED lease) ◄─────────┘
   - Headers carry `x-crm-signature: v1=HMAC-SHA256(secret, "<timestamp>.<body>")`, `x-crm-timestamp`, `x-crm-delivery-id`, `x-crm-event-id` and `x-crm-event-type`.
   - Targets must be HTTPS and resolve to public addresses only (SSRF guard, re-checked on every attempt); redirects are not followed and requests time out after 10 s.
   - 5xx and network errors retry with backoff; other 4xx fail permanently; a disabled endpoint cancels its deliveries.
-- **Not exposed yet:** there is no management API or UI. Endpoints are created by operators until a secured management surface exists.
+- **Management (Phase 7):** `/api/v1/webhooks` (list, event types, create, update URL/events/description/active, rotate secret, delete) behind `settings.integrations.manage` (Admin, custom roles; migration 0008) and the sensitive rate limit. Secrets are generated server-side (`whsec_…`), returned only by create/rotate, encrypted with the API's `WEBHOOK_SECRET_KEY` (must equal the worker's), and never logged or audited. URL and event allow-list are validated on write; at most 10 endpoints per organization. Web UI: Settings → Webhooks.
+
+## Operations (Phase 7)
+
+- **Observability:** JSON logs with redaction, Prometheus `/metrics` on `WORKER_HEALTH_PORT` (bearer `METRICS_TOKEN`): outbox pending/dead/oldest, queue counts, job duration/retries/failures by `job_name`, DB pool. Readiness requires the database, the durable queue in production, a running relay and no draining.
+- **Retention** (`maintenance.sweep`, `db/retention.ts`): sessions expired/revoked beyond `SESSION_RETENTION_DAYS`, expired refresh tokens, used/expired reset requests, read notifications, finished email/webhook deliveries and metadata of provider-deleted files — in bounded batches. CRM business records are never deleted.
+- **Interrupted sends:** a message in `Sending` inside its 60 s lease belongs to a live attempt (a concurrent duplicate job skips it); older ones are settled by the sweep as `Failed / DELIVERY_UNKNOWN`, never resent.
+- **Redis data loss:** `packages/database/scripts/outbox-replay.mjs --since <time> --apply` re-dispatches events whose jobs were lost; processors are idempotent.
+- **Reminder copy** includes the due time in the organization's time zone (validated against `pg_timezone_names`, UTC fallback).
 
 ## Plans, entitlements and usage
 

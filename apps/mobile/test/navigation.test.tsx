@@ -145,7 +145,7 @@ describe('auth routing', () => {
   test('switching organization from the drawer resets to Home of the new organization', async () => {
     await tokens.store({ accessToken: 'access-1', refreshToken: 'refresh-1' });
     const orgB = makeSession({
-      organization: ORG_B,
+      organization: { ...ORG_B, timezone: 'Asia/Kolkata' },
       membership: { id: 80, role: { key: 'sales', name: 'Sales' } },
     });
     fakeServer({ ...homeRoutes, 'POST /auth/switch-organization': { data: withTokens(orgB, 2) } });

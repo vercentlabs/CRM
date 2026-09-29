@@ -10,6 +10,7 @@ import {
   type ApiModule,
 } from '../../platform/http/route.js';
 import { actorFrom } from '../../platform/tenancy.js';
+import { policies, rateLimit } from '../../platform/rate-limit.js';
 import * as service from './organizations.service.js';
 
 const userParams = z.object({ userId: z.coerce.number().int().positive() });
@@ -128,6 +129,7 @@ export const organizationsModule: ApiModule = {
       path: '/organizations/:organizationId/accept-invitation',
       summary: 'Accept an invitation',
       tags,
+      before: [rateLimit(policies.invitation)],
       controller: acceptInvitation,
       response: z.object({ accepted: z.literal(true) }),
     },
@@ -182,6 +184,7 @@ export const organizationsModule: ApiModule = {
       summary: 'Add a member (existing identities are invited)',
       tags,
       permission: 'settings.users.manage',
+      before: [rateLimit(policies.sensitive)],
       controller: addMember,
       response: memberSchema,
       successStatus: 201,
@@ -192,6 +195,7 @@ export const organizationsModule: ApiModule = {
       summary: "Change a member's role and/or status",
       tags,
       permission: 'settings.users.manage',
+      before: [rateLimit(policies.sensitive)],
       controller: updateMember,
       response: memberSchema,
     },
@@ -201,6 +205,7 @@ export const organizationsModule: ApiModule = {
       summary: "Update a member's identity (self, or members of this organization only)",
       tags,
       permission: 'settings.users.manage',
+      before: [rateLimit(policies.sensitive)],
       controller: updateProfile,
       response: memberSchema,
     },

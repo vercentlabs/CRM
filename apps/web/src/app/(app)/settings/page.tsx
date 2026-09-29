@@ -6,7 +6,13 @@ export const metadata: Metadata = { title: 'Settings' };
 
 export default function Page() {
   return (
-    <RequirePermission anyOf={['settings.organization.manage', 'settings.audit.read']}>
+    <RequirePermission
+      anyOf={[
+        'settings.organization.manage',
+        'settings.audit.read',
+        'settings.integrations.manage',
+      ]}
+    >
       <SettingsScreen />
     </RequirePermission>
   );

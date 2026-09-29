@@ -4,10 +4,12 @@ import { z } from 'zod';
 import { AppError } from '../../platform/http/errors.js';
 import { controller, created, ok, type ApiModule } from '../../platform/http/route.js';
 import { actorFrom } from '../../platform/tenancy.js';
+import { policies, rateLimit } from '../../platform/rate-limit.js';
 import {
   ALLOWED_MIME_TYPES,
   MAX_UPLOAD_BYTES,
   deleteFile,
+  fileAccessUrl,
   uploadChatAttachment,
 } from './files.service.js';
 
@@ -40,6 +42,11 @@ const remove = controller({
   },
 });
 
+const accessUrl = controller({
+  params: z.object({ id: z.uuid() }),
+  handle: async ({ auth, params }) => ok(await fileAccessUrl(actorFrom(auth), params.id)),
+});
+
 const upload = controller({
   handle: async ({ auth, req }) => created(await uploadChatAttachment(actorFrom(auth), req.file)),
 });
@@ -53,11 +60,21 @@ export const filesModule: ApiModule = {
       summary: 'Upload a chat attachment (multipart field `file`, max 10 MB)',
       tags: ['Files'],
       permission: 'crm.chat.use',
-      before: [singleFile],
+      before: [rateLimit(policies.sensitive), singleFile],
       consumes: 'multipart/form-data',
       controller: upload,
       response: storedFileSchema,
       successStatus: 201,
+    },
+    {
+      method: 'get',
+      path: '/files/:id/url',
+      summary:
+        'Short-lived signed URL for a file (uploader or participant of the conversation it belongs to)',
+      tags: ['Files'],
+      permission: 'crm.chat.use',
+      controller: accessUrl,
+      response: z.object({ url: z.string(), expiresAt: z.string() }),
     },
     {
       method: 'delete',

@@ -65,7 +65,8 @@ These are the implementation-critical facts. Read this before touching any query
 - Services obtain the tenant only through `actorFrom(req.auth)` and `ownerFilter(actor, p)` / `assertMember` / `filterActiveMembers` from `src/platform/tenancy.ts` (Phase 3). Repositories take `(db, tenant, …)`, every read, update or delete includes `organization_id = $n`, and inserts take `organization_id` from `tenant`. Foreign ids from the body (assignees, lead_id, location_id, chat participants) are validated inside the organization.
 - **IDOR rule:** a record in another organization answers **404**. A record in the same organization but outside the caller's scope answers 403.
 - **Audit:** `recordAuditEvent()` (`src/platform/audit.ts`) stamps organization, actor, request id, IP and user agent from context and redacts password, token, hash and key fields.
-- **Rate limiting:** an in-memory per-IP+email limiter covers login, refresh and password reset (`AUTH_RATE_LIMIT_MAX` per `AUTH_RATE_LIMIT_WINDOW_SECONDS`). Phase 7 moves it to a shared store.
+- **Rate limiting (Phase 7):** `platform/rate-limit.ts` — Redis-backed fixed windows shared by every API instance (in-memory only in development/tests), hashed keys, fail closed (503) when Redis is down. Policies: login (IP + email, and IP), refresh, password forgot/reset/verify, invitation acceptance, and sensitive writes (member management, uploads, messaging, webhook management). Details: `docs/operations/SECURITY.md`.
+- **Organization time zone (Phase 7):** the session view carries `organization.timezone` (the organization's `timezone` setting, validated as an IANA name on update; invalid or missing → `UTC`). Utilities: `@crm/validation` `timezone.ts`.
 - **Plivo:** webhooks require a valid `X-Plivo-Signature-V3` over `PLIVO_WEBHOOK_URL` + suffix (SDK `validateV3Signature`). They fail closed when the URL is not configured.
 
 ## Migrations and backfill

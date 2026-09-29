@@ -4,6 +4,10 @@ import {
   ProviderError,
   assertSafeWebhookTarget,
   buildResetUrl,
+  checkPlivoWebhookUrl,
+  plivoCallbackUrls,
+  createImageKitStorage,
+  createMemoryStorage,
   decryptSecret,
   encryptSecret,
   isPermanentStatus,
@@ -148,5 +152,72 @@ describe('SSRF guard', () => {
     await expect(
       assertSafeWebhookTarget('ftp://hooks.example.com', { allowPrivate: true }),
     ).rejects.toThrow(/scheme/);
+  });
+});
+
+describe('signed file URLs', () => {
+  it('memory storage issues expiring, tamper-proof URLs', async () => {
+    let clock = 1_700_000_000_000;
+    const storage = createMemoryStorage({ signingSecret: 's', now: () => clock });
+    const object = await storage.put({
+      buffer: Buffer.from('x'),
+      folder: 'f',
+      name: 'a.txt',
+      tags: [],
+    });
+    const url = storage.signedUrl(object, 60);
+    expect(url).toMatch(/\?expires=\d+&signature=[0-9a-f]{64}$/);
+    expect(storage.verifySignedUrl(url)).toBe(true);
+    expect(storage.verifySignedUrl(url.replace('a.txt', 'b.txt'))).toBe(false);
+    expect(storage.verifySignedUrl(object.url)).toBe(false);
+    clock += 61_000;
+    expect(storage.verifySignedUrl(url)).toBe(false);
+  });
+
+  it('ImageKit URLs are signed with an expiry', () => {
+    const storage = createImageKitStorage({
+      publicKey: 'public_test',
+      privateKey: 'private_test',
+      urlEndpoint: 'https://ik.imagekit.io/demo',
+    });
+    const url = new URL(
+      storage.signedUrl({ url: 'https://ik.imagekit.io/demo/org/a.png', providerFileId: 'p' }, 600),
+    );
+    expect(url.searchParams.get('ik-s')).toMatch(/^[0-9a-f]{40}$/);
+    expect(Number(url.searchParams.get('ik-t'))).toBeGreaterThan(Date.now() / 1000);
+  });
+});
+
+describe('Plivo callback URLs', () => {
+  it('derives every callback from the webhook base (trailing slash tolerated)', () => {
+    expect(plivoCallbackUrls('https://api.example.com/api/plivo/webhook/')).toEqual({
+      answer: 'https://api.example.com/api/plivo/webhook/answer',
+      recording: 'https://api.example.com/api/plivo/webhook/recording',
+      status: 'https://api.example.com/api/plivo/webhook/status',
+      messageStatus: 'https://api.example.com/api/plivo/webhook/message-status',
+    });
+  });
+
+  it('diagnoses unusable webhook URLs', () => {
+    expect(
+      checkPlivoWebhookUrl('https://api.example.com/api/plivo/webhook', { production: true }).ok,
+    ).toBe(true);
+    const cases: Array<[string | undefined, RegExp]> = [
+      [undefined, /not set/],
+      ['api.example.com/webhook', /absolute/],
+      ['https://api.example.com/api/plivo', /\/webhook/],
+      ['https://api.example.com/api/plivo/webhook?x=1', /query/],
+      ['http://api.example.com/api/plivo/webhook', /https/],
+      ['https://localhost/api/plivo/webhook', /publicly reachable/],
+      ['https://192.168.1.10/api/plivo/webhook', /publicly reachable/],
+    ];
+    for (const [value, pattern] of cases) {
+      const result = checkPlivoWebhookUrl(value, { production: true });
+      expect(result.ok).toBe(false);
+      expect(result.problems.join(' ')).toMatch(pattern);
+    }
+    expect(
+      checkPlivoWebhookUrl('http://api.example.com/api/plivo/webhook', { production: false }).ok,
+    ).toBe(true);
   });
 });

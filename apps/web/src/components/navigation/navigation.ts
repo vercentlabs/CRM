@@ -148,7 +148,11 @@ export const NAVIGATION: NavGroup[] = [
         label: 'Settings',
         href: '/settings',
         icon: SettingsIcon,
-        anyOf: ['settings.organization.manage', 'settings.audit.read'],
+        anyOf: [
+          'settings.organization.manage',
+          'settings.audit.read',
+          'settings.integrations.manage',
+        ],
         keywords: 'organization preferences audit log',
       },
     ],

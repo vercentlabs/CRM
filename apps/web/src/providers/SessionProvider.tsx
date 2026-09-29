@@ -16,6 +16,7 @@ import {
 import { api, onSessionEvent } from '@/lib/api';
 import { csrf } from '@/lib/csrf';
 import { isStatus } from '@/lib/errors';
+import { setDisplayTimeZone } from '@/lib/format';
 import { can, canAny, canOrg, scopeOf } from '@/lib/permissions';
 import type { QueryKeyPart } from '@/lib/query';
 
@@ -84,6 +85,9 @@ export function SessionProvider({
   );
   const [expired, setExpired] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // Dates render in the active organization's zone. Set during render (idempotent,
+  // module-level) so the first paint after login or an organization switch is correct.
+  setDisplayTimeZone(session?.organization.timezone);
 
   const apply = useCallback((next: AuthSessionView) => {
     csrf.set(next.csrfToken);

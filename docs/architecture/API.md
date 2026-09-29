@@ -70,6 +70,15 @@ Request schemas live in `@crm/validation` (`src/crm/schemas.ts`, shared helpers 
 - Sorting is allowlisted per module: `?sort=field` or `?sort=-field` maps to a fixed SQL expression; anything else is a 400.
 - Search (`leads.search`, `notes.search`) is parameterized `ILIKE` with `%`, `_` and `\` escaped. No `pg_trgm`/new indexes were added: current volumes do not justify a migration.
 
+## Production hardening (Phase 7)
+
+- **Middleware order:** request context → access log → security headers (helmet) → JSON body (`BODY_LIMIT`) → CORS → `/metrics` → `/api/v1` (`Cache-Control: no-store`, `X-CRM-Version`) → provider webhooks → 404 → error handler.
+- **Rate limits** are route `before` middleware (`rateLimit(policies.…)`), shared through Redis.
+- **Errors:** unexpected failures are logged at error with a stack and reported (`captureError`); deliberate `AppError` 5xx are warnings.
+- **New routes:** `/webhooks` (management, `settings.integrations.manage`), `GET /files/:id/url` (signed file access). `GET /api/v1` also returns `build { version, commit }`.
+- **Metrics:** `GET /metrics` (Prometheus, bearer `METRICS_TOKEN`, disabled when unset). See `docs/operations/MONITORING.md`.
+- **CLI:** `pnpm plivo:check [--probe]` validates `PLIVO_WEBHOOK_URL` and prints the Plivo callback URLs.
+
 ## OpenAPI
 
 `GET /api/v1/openapi.json` is generated at runtime from the route registry (`platform/http/openapi.ts`): paths, parameters and bodies from the Zod schemas (`z.toJSONSchema`), response `data` from each route's documented schema, security schemes (bearer + `crm_at` cookie), the standard error envelope and `x-permission`. `GET /api/v1` returns `{ name, version, openapi }`. `test/openapi.test.ts` validates the document against the OpenAPI 3.1 schema and checks that every registered route is present.

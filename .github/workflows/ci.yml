@@ -1,0 +1,155 @@
+name: CI
+
+# Pull requests and main: the release gate (hygiene, migrations, format, lint,
+# typecheck, ALL tests with PostgreSQL + Redis, builds), migrations on a fresh
+# database, backup/restore verification, web E2E, Docker images and the
+# Android JS bundle. A red CI blocks merging (configure branch protection).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+  TURBO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  release-gate:
+    name: Release gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: crm
+          POSTGRES_PASSWORD: crm_test_pw
+          POSTGRES_DB: crm_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U crm -d crm_test" --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://crm:crm_test_pw@127.0.0.1:5432/crm_test
+      REDIS_TEST_URL: redis://127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+      - name: Release gate
+        run: pnpm verify:release
+      - name: Migrations on a fresh database, then idempotent re-run
+        env:
+          DATABASE_URL: postgresql://crm:crm_test_pw@127.0.0.1:5432/crm_ci_fresh
+        run: |
+          psql "postgresql://crm:crm_test_pw@127.0.0.1:5432/crm_test" -c "CREATE DATABASE crm_ci_fresh"
+          pnpm db:migrate
+          pnpm db:migrate | tee migrate-again.log
+          grep -q "Nothing to apply" migrate-again.log
+          pnpm db:migrate:status
+      - name: Backup and restore verification (pg_dump -Fc / pg_restore)
+        env:
+          VERIFY_ADMIN_URL: postgresql://crm:crm_test_pw@127.0.0.1:5432/postgres
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
+          export PATH=/usr/lib/postgresql/16/bin:$PATH
+          node packages/database/scripts/backup-restore-verify.mjs
+
+  web-e2e:
+    name: Web E2E (Playwright)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: crm
+          POSTGRES_PASSWORD: e2e_pw
+          POSTGRES_DB: crm_e2e
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U crm -d crm_e2e" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      E2E_DATABASE_URL: postgresql://crm:e2e_pw@127.0.0.1:5432/crm_e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo run build --filter=@crm/api...
+      - name: Install Chromium
+        run: pnpm --filter @crm/web exec playwright install --with-deps chromium
+      - name: Playwright
+        run: node scripts/verify-release.mjs --e2e --only E2E
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: apps/web/test-results
+          retention-days: 7
+
+  docker:
+    name: Docker images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [api, worker, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/${{ matrix.image }}.Dockerfile
+          push: false
+          load: true
+          tags: crm-${{ matrix.image }}:ci
+          build-args: |
+            APP_VERSION=ci-${{ github.run_number }}
+            GIT_SHA=${{ github.sha }}
+            NEXT_PUBLIC_API_BASE_URL=https://api.example.invalid
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+      - name: Image runs as non-root with build metadata
+        run: |
+          test "$(docker image inspect crm-${{ matrix.image }}:ci -f '{{.Config.User}}')" = "node"
+          docker image inspect crm-${{ matrix.image }}:ci -f '{{json .Config.Env}}' | grep -q "GIT_SHA=${{ github.sha }}"
+
+  mobile:
+    name: Mobile (tests + Android bundle)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo run build --filter=@crm/mobile^...
+      - name: Android JS bundle (expo export)
+        working-directory: apps/mobile
+        run: pnpm exec expo export --platform android --output-dir dist-android

@@ -13,6 +13,9 @@ dist/
 build/
 .expo/
 web-build/
+dist-android/
+test-results/
+playwright-report/
 .turbo/
 coverage/
 *.tsbuildinfo

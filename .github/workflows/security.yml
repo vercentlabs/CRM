@@ -1,0 +1,65 @@
+name: Security
+
+# Secret scanning, dependency audit and tracked-file hygiene.
+#
+# Git history is known to contain credentials committed before Phase 7 (an
+# Alpha Vantage API key and historical admin credentials). History is NOT
+# rewritten; those credentials must be ROTATED (docs/operations/LAUNCH_CHECKLIST.md).
+# Pull requests and pushes therefore scan only the new commits and fail on any
+# finding; the weekly job scans the full history and stays red until the
+# historical findings are rotated and recorded in .gitleaksignore.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Commit range
+        id: range
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "opts=--log-opts=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            echo "opts=--log-opts=${{ github.event.before }}..${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "opts=" >> "$GITHUB_OUTPUT"   # scheduled/manual: full history
+          fi
+      - name: gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:v8.24.3 \
+            git --redact --no-banner --exit-code 1 ${{ steps.range.outputs.opts }} /repo
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Lockfile is frozen and consistent
+        run: pnpm install --frozen-lockfile --lockfile-only
+      - name: pnpm audit (production dependencies, high and critical)
+        run: pnpm audit --prod --audit-level high
+
+  hygiene:
+    name: Tracked-file hygiene
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: No environment files, keys, logs or build output are tracked
+        run: node scripts/verify-release.mjs --only hygiene

@@ -77,6 +77,7 @@ describe.skipIf(!hasTestDatabase)('/api/v1 modules', () => {
         name: 'CRM API',
         version: expect.any(String),
         openapi: '/api/v1/openapi.json',
+        build: { version: expect.any(String), commit: expect.any(String) },
       });
     });
 
@@ -694,6 +695,35 @@ describe.skipIf(!hasTestDatabase)('/api/v1 modules', () => {
       expect(updated.status).toBe(200);
       const other = await as('bAdmin', 'GET', '/settings');
       expect(JSON.stringify(other.body.data)).not.toContain('Asia/Kolkata');
+    });
+
+    it('validates the organization time zone and exposes it in the session', async () => {
+      for (const timezone of ['Mars/Olympus', 'UTC+5', '', 42]) {
+        expectError(
+          await as('aAdmin', 'PATCH', '/settings', { settings: { timezone } }),
+          400,
+          'VALIDATION_FAILED',
+        );
+      }
+      expect(
+        (await as('aAdmin', 'PATCH', '/settings', { settings: { timezone: 'America/New_York' } }))
+          .status,
+      ).toBe(200);
+      expect((await as('aSales', 'GET', '/auth/session')).body.data.organization.timezone).toBe(
+        'America/New_York',
+      );
+      expect((await as('bAdmin', 'GET', '/auth/session')).body.data.organization.timezone).toBe(
+        'UTC',
+      );
+      // A corrupt stored value never breaks the session: it falls back to UTC.
+      await db.pool.query(
+        `UPDATE settings SET value = '"Not/AZone"' WHERE organization_id = $1 AND key = 'timezone'`,
+        [fx.orgA.id],
+      );
+      expect((await as('aSales', 'GET', '/auth/session')).body.data.organization.timezone).toBe(
+        'UTC',
+      );
+      await as('aAdmin', 'PATCH', '/settings', { settings: { timezone: 'Asia/Kolkata' } });
     });
 
     it('lists the audit log of the organization only, paginated', async () => {

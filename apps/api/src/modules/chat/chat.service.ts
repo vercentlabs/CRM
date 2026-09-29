@@ -5,7 +5,7 @@ import type { z } from 'zod';
 import { pool } from '../../platform/db.js';
 import { AppError } from '../../platform/http/errors.js';
 import { filterActiveMembers, type Actor } from '../../platform/tenancy.js';
-import { attachToChatMessage } from '../files/files.service.js';
+import { attachToChatMessage, signAttachment } from '../files/files.service.js';
 import * as chat from './chat.repository.js';
 
 /**
@@ -27,7 +27,7 @@ export async function listMessages(actor: Actor, conversationId: number): Promis
   const id = await requireConversation(actor, conversationId);
   const rows = await chat.listMessages(pool, actor, id);
   await chat.touchLastRead(pool, id, actor.userId);
-  return rows;
+  return rows.map(signAttachment);
 }
 
 export async function createConversation(
@@ -99,7 +99,7 @@ export async function sendMessage(
     });
   });
   await chat.touchLastRead(pool, id, actor.userId);
-  return (await chat.findMessage(pool, actor, messageId))!;
+  return signAttachment((await chat.findMessage(pool, actor, messageId))!);
 }
 
 export async function markRead(actor: Actor, conversationId: number): Promise<void> {

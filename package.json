@@ -20,12 +20,15 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "format": "prettier --write packages apps/worker apps/api/src apps/api/test apps/web/src apps/web/test apps/web/e2e apps/mobile/src apps/mobile/test apps/mobile/App.tsx docs *.json *.yaml *.md",
-    "format:check": "prettier --check packages apps/worker apps/api/src apps/api/test apps/web/src apps/web/test apps/web/e2e apps/mobile/src apps/mobile/test apps/mobile/App.tsx docs *.json *.yaml *.md",
+    "format": "prettier --write packages apps/worker apps/api/src apps/api/test apps/web/src apps/web/test apps/web/e2e apps/mobile/src apps/mobile/test apps/mobile/App.tsx apps/web/security-headers.ts scripts docs *.json *.yaml *.md",
+    "format:check": "prettier --check packages apps/worker apps/api/src apps/api/test apps/web/src apps/web/test apps/web/e2e apps/mobile/src apps/mobile/test apps/mobile/App.tsx apps/web/security-headers.ts scripts docs *.json *.yaml *.md",
+    "verify:release": "node scripts/verify-release.mjs",
+    "verify:release:e2e": "node scripts/verify-release.mjs --e2e",
     "db:migrate": "turbo run build --filter=@crm/database && pnpm --filter @crm/database run migrate",
     "db:migrate:status": "turbo run build --filter=@crm/database && pnpm --filter @crm/database run migrate:status",
     "db:migrate:baseline": "turbo run build --filter=@crm/database && pnpm --filter @crm/database run migrate:baseline",
-    "org:bootstrap": "turbo run build --filter=@crm/api... && pnpm --filter @crm/api run org:bootstrap"
+    "org:bootstrap": "turbo run build --filter=@crm/api... && pnpm --filter @crm/api run org:bootstrap",
+    "plivo:check": "turbo run build --filter=@crm/api... && pnpm --filter @crm/api run plivo:check --"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

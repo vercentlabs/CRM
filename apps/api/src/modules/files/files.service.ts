@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { withTransaction, type DatabaseClient } from '@crm/database';
-import type { StoredFile } from '@crm/types';
+import type { ChatMessage, StoredFile } from '@crm/types';
 import { pool } from '../../platform/db.js';
 import { assertWithinLimit, requireFeature } from '../../platform/entitlements.js';
 import { emit } from '../../platform/events.js';
 import { AppError } from '../../platform/http/errors.js';
+import { env } from '../../platform/env.js';
 import { errorFields, logger } from '../../platform/logger.js';
 import { fileStorage } from '../../platform/providers.js';
 import { can, type Actor } from '../../platform/tenancy.js';
@@ -25,10 +26,21 @@ export interface IncomingFile {
   size: number;
 }
 
+/**
+ * Files are read through short-lived signed URLs issued after an
+ * authorization check (FILE_URL_TTL_SECONDS). Historical messages that
+ * predate file tracking keep their stored URL (documented limitation).
+ */
+const signed = (row: { url: string; provider_file_id: string }) =>
+  fileStorage().signedUrl(
+    { url: row.url, providerFileId: row.provider_file_id },
+    env.FILE_URL_TTL_SECONDS,
+  );
+
 const toStoredFile = (row: files.FileRow): StoredFile => ({
   id: row.public_id,
   fileId: row.public_id,
-  url: row.url,
+  url: signed(row),
   name: row.filename,
   size: Number(row.size_bytes),
   fileType: row.mime_type,
@@ -153,4 +165,31 @@ export async function deleteFile(actor: Actor, publicId: string): Promise<void> 
     await addUsage(tx, actor.organizationId, 'storage.bytes', -Number(file.size_bytes));
     await emit(tx, actor, 'file.deleted', file.id, { fileId: file.id });
   });
+}
+
+/** Replaces a tracked attachment's stored URL with a signed one; strips internal fields. */
+export function signAttachment(
+  row: ChatMessage & { file_id: string | null; file_provider_id: string | null },
+): ChatMessage {
+  const { file_provider_id, ...message } = row;
+  if (file_provider_id && message.attachment_url) {
+    message.attachment_url = signed({
+      url: message.attachment_url,
+      provider_file_id: file_provider_id,
+    });
+  }
+  return message;
+}
+
+/** Short-lived URL for a file the actor may read; everything else is a uniform 404. */
+export async function fileAccessUrl(
+  actor: Actor,
+  publicId: string,
+): Promise<{ url: string; expiresAt: string }> {
+  const file = await files.findReadable(pool, actor, publicId, actor.userId);
+  if (!file) throw AppError.notFound('File not found');
+  return {
+    url: signed(file),
+    expiresAt: new Date(Date.now() + env.FILE_URL_TTL_SECONDS * 1000).toISOString(),
+  };
 }

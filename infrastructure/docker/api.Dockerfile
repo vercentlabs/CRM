@@ -17,7 +17,12 @@ RUN pnpm --filter "@crm/api..." run build
 RUN pnpm install --frozen-lockfile --prod --filter "@crm/api..."
 
 FROM node:22-alpine AS runtime
-ENV NODE_ENV=production
+# Build metadata (reported by /api/v1, X-CRM-Version, logs and crm_build_info).
+ARG APP_VERSION=0.0.0-dev
+ARG GIT_SHA=dev
+ARG BUILD_TIME
+LABEL org.opencontainers.image.version=$APP_VERSION org.opencontainers.image.revision=$GIT_SHA org.opencontainers.image.created=$BUILD_TIME org.opencontainers.image.source="https://github.com/vercentlabs/CRM"
+ENV NODE_ENV=production APP_VERSION=$APP_VERSION GIT_SHA=$GIT_SHA BUILD_TIME=$BUILD_TIME
 WORKDIR /repo
 COPY --from=build --chown=node:node /repo/node_modules ./node_modules
 COPY --from=build --chown=node:node /repo/packages ./packages

@@ -27,6 +27,7 @@ import { formatDateTime, toIsoOrNull } from '@/lib/format';
 import { humanizeCode } from '@/lib/labels';
 import { useMemberOptions } from '@/modules/organization/hooks';
 import { useQueryKey, useSession } from '@/providers/SessionProvider';
+import { WebhooksSettings } from './WebhooksSettings';
 
 export function SettingsScreen() {
   const { can } = useSession();
@@ -37,6 +38,9 @@ export function SettingsScreen() {
           { id: 'organization', label: 'Organization', content: <OrganizationSettings /> },
           { id: 'email', label: 'Email delivery', content: <EmailCheck /> },
         ]
+      : []),
+    ...(can('settings.integrations.manage')
+      ? [{ id: 'webhooks', label: 'Webhooks', content: <WebhooksSettings /> }]
       : []),
     ...(can('settings.audit.read')
       ? [{ id: 'audit', label: 'Audit log', content: <AuditLog /> }]

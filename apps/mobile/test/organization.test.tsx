@@ -32,7 +32,7 @@ function LeadCount() {
 
 const orgBSession = () =>
   makeSession({
-    organization: ORG_B,
+    organization: { ...ORG_B, timezone: 'Asia/Kolkata' },
     membership: { id: 80, role: { key: 'sales', name: 'Sales' } },
   });
 

@@ -13,6 +13,8 @@ export interface CreatePoolOptions {
   /** Extra libpq options, e.g. `-c search_path=...` (used by tests). */
   options?: string;
   applicationName?: string;
+  /** TLS: false (none) or pg SSL options; production callers pass verified TLS. */
+  ssl?: false | { rejectUnauthorized: boolean; ca?: string };
 }
 
 let parsersConfigured = false;
@@ -44,5 +46,6 @@ export function createPool(options: CreatePoolOptions): DatabasePool {
     connectionTimeoutMillis: options.connectionTimeoutMillis ?? 10_000,
     ...(options.options ? { options: options.options } : {}),
     ...(options.applicationName ? { application_name: options.applicationName } : {}),
+    ...(options.ssl ? { ssl: options.ssl } : {}),
   });
 }

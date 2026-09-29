@@ -101,7 +101,7 @@ describe('error handling', () => {
   });
 
   it('hides internal error messages and stack traces', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const mini = express();
     mini.use(requestContextMiddleware);
     mini.get('/api/v1/boom', () => {
@@ -133,6 +133,46 @@ describe('error handling', () => {
       await new Promise((resolve) => miniServer.close(resolve));
       errorSpy.mockRestore();
     }
+  });
+
+  it('logs bugs as reported errors but dependency outages as warnings without stacks', async () => {
+    const lines: string[] = [];
+    const capture = (chunk: unknown) => {
+      lines.push(String(chunk));
+      return true;
+    };
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(capture);
+    const out = vi.spyOn(process.stdout, 'write').mockImplementation(capture);
+    const mini = express();
+    mini.use(requestContextMiddleware);
+    mini.get('/api/v1/bug', () => {
+      throw new TypeError('cannot read x of undefined');
+    });
+    mini.get('/api/v1/outage', () => {
+      throw AppError.serviceUnavailable('Gold rate service unavailable');
+    });
+    mini.use(errorHandler);
+    const { server: miniServer, baseUrl: miniUrl } = await listen(mini);
+    try {
+      expect((await fetch(`${miniUrl}/api/v1/bug`)).status).toBe(500);
+      expect((await fetch(`${miniUrl}/api/v1/outage`)).status).toBe(503);
+    } finally {
+      await new Promise((resolve) => miniServer.close(resolve));
+      err.mockRestore();
+      out.mockRestore();
+    }
+    const records = lines
+      .flatMap((l) => l.split('\n'))
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    const failed = (status: number) =>
+      records.find((r) => r.msg === 'request_failed' && r.status === status)!;
+    expect(failed(500).level).toBe('error');
+    expect(JSON.stringify(failed(500))).toContain('stack');
+    expect(failed(503).level).toBe('warn');
+    expect(JSON.stringify(failed(503))).not.toContain('stack');
+    const captured = records.filter((r) => r.msg === 'error_captured');
+    expect(captured).toHaveLength(1);
   });
 });
 

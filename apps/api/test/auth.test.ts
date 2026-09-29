@@ -42,6 +42,7 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
         id: fx.orgA.publicId,
         name: 'Alpha Corp',
         slug: 'alpha',
+        timezone: 'UTC',
       });
       expect(data.membership.role.key).toBe('manager');
       expect(data.permissions['crm.leads.read']).toBe('organization');
@@ -389,6 +390,48 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
       ).toBe(401);
     });
 
+    it('requires the CSRF token on every unsafe method with cookies, never with a bearer token', async () => {
+      const res = await login({ email: fx.users.aManager.email, password: PASSWORD });
+      const csrf = res.body.data.csrfToken as string;
+      const cookie = `crm_at=${cookiesFrom(res.headers).crm_at!.value}`;
+      const missing = 'Missing or invalid CSRF token';
+      const unsafe: Array<[string, string, unknown]> = [
+        ['POST', '/api/v1/tasks', { title: 'x' }],
+        ['PUT', '/api/v1/leads/999999/assignment', { assigned_to: fx.users.aSales.id }],
+        ['PATCH', '/api/v1/tasks/999999', { title: 'x' }],
+        ['DELETE', '/api/v1/tasks/999999', undefined],
+      ];
+      for (const [method, path, body] of unsafe) {
+        const without = await call(base, method, path, { headers: { cookie }, body });
+        expect(without.status, `${method} ${path}`).toBe(403);
+        expect(without.body.error.message).toBe(missing);
+        const forged = await call(base, method, path, {
+          headers: { cookie, 'x-csrf-token': `${csrf}x` },
+          body,
+        });
+        expect(forged.status).toBe(403);
+        const valid = await call(base, method, path, {
+          headers: { cookie, 'x-csrf-token': csrf },
+          body,
+        });
+        expect(valid.body.error?.message).not.toBe(missing);
+      }
+      // A CSRF token of another session is rejected.
+      const other = await login({ email: fx.users.aAdmin.email, password: PASSWORD });
+      const foreign = await call(base, 'DELETE', '/api/v1/tasks/999999', {
+        headers: { cookie, 'x-csrf-token': other.body.data.csrfToken },
+      });
+      expect(foreign.status).toBe(403);
+      // Bearer (mobile/API) clients are not exposed to CSRF and need no token.
+      const mobile = await loginMobile(base, fx.users.aManager.email);
+      const bearer = await call(base, 'DELETE', '/api/v1/tasks/999999', {
+        token: mobile.accessToken,
+      });
+      expect(bearer.status).toBe(404);
+      // Safe methods never require it.
+      expect((await call(base, 'GET', '/api/v1/tasks', { headers: { cookie } })).status).toBe(200);
+    });
+
     it('allows credentialed CORS only for allow-listed origins', async () => {
       const allowed = await fetch(`${base}/api/v1/auth/session`, {
         method: 'OPTIONS',
@@ -460,6 +503,74 @@ describe.skipIf(!hasTestDatabase)('authentication and sessions', () => {
       await db.pool.query(
         'UPDATE users SET password_hash = (SELECT password_hash FROM users WHERE id = $1) WHERE id = $2',
         [fx.users.bAdmin.id, fx.users.bSales.id],
+      );
+    });
+
+    it('rejects expired tokens and never writes the token to logs', async () => {
+      const writes: string[] = [];
+      const capture = (chunk: unknown) => {
+        writes.push(String(chunk));
+        return true;
+      };
+      const out = vi.spyOn(process.stdout, 'write').mockImplementation(capture);
+      const err = vi.spyOn(process.stderr, 'write').mockImplementation(capture);
+      try {
+        const expired = 'expired-reset-token-value-1234567890';
+        await db.pool.query(
+          `INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES ($1, $2, now() - interval '1 minute')`,
+          [fx.users.aSales.id, createHash('sha256').update(expired).digest('hex')],
+        );
+        const verify = await call(base, 'POST', '/api/v1/auth/password/verify', {
+          body: { token: expired },
+        });
+        expect(verify.status).toBe(400);
+        const reset = await call(base, 'POST', '/api/v1/auth/password/reset', {
+          body: { token: expired, newPassword: 'Newpassw0rd' },
+        });
+        expect(reset.status).toBe(400);
+        expect(JSON.stringify(reset.body)).not.toContain(expired);
+        const unknown = await call(base, 'POST', '/api/v1/auth/password/reset', {
+          body: { token: 'never-issued-token-abcdef', newPassword: 'Newpassw0rd' },
+        });
+        expect(unknown.status).toBe(400);
+        expect(unknown.body.error.message).toBe(reset.body.error.message);
+        expect(writes.join('')).not.toContain(expired);
+        expect(writes.join('')).not.toContain('Newpassw0rd');
+      } finally {
+        out.mockRestore();
+        err.mockRestore();
+      }
+      // The expired row was not consumed and the password is unchanged.
+      expect((await login({ email: fx.users.aSales.email, password: PASSWORD })).status).toBe(200);
+    });
+
+    it('revokes refresh tokens of every session on reset', async () => {
+      const session = await loginMobile(base, fx.users.aSales2.email);
+      const token = 'reset-token-for-refresh-revocation';
+      await db.pool.query(
+        `INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '1 hour')`,
+        [fx.users.aSales2.id, createHash('sha256').update(token).digest('hex')],
+      );
+      expect(
+        (
+          await call(base, 'POST', '/api/v1/auth/password/reset', {
+            body: { token, newPassword: 'Newpassw0rd' },
+          })
+        ).status,
+      ).toBe(200);
+      const refreshed = await call(base, 'POST', '/api/v1/auth/refresh', {
+        body: { refreshToken: session.refreshToken },
+      });
+      expect(refreshed.status).toBe(401);
+      const stored = await db.pool.query(
+        'SELECT token_hash, used FROM password_resets WHERE user_id = $1',
+        [fx.users.aSales2.id],
+      );
+      expect(stored.rows[0].used).toBe(true);
+      expect(stored.rows[0].token_hash).not.toBe(token);
+      await db.pool.query(
+        'UPDATE users SET password_hash = (SELECT password_hash FROM users WHERE id = $1) WHERE id = $2',
+        [fx.users.bAdmin.id, fx.users.aSales2.id],
       );
     });
 

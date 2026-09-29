@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ApiModule } from '../../platform/http/route.js';
 import * as messages from './messages.controller.js';
+import { policies, rateLimit } from '../../platform/rate-limit.js';
 import { leadMessageSchema } from './messages.controller.js';
 
 const tags = ['Lead messages'];
@@ -24,6 +25,7 @@ export const messagesModule: ApiModule = {
       summary: 'Send a message to a lead',
       tags,
       permission: 'crm.messages.send',
+      before: [rateLimit(policies.sensitive)],
       controller: messages.send,
       response: leadMessageSchema,
       successStatus: 201,
@@ -34,6 +36,7 @@ export const messagesModule: ApiModule = {
       summary: 'Send one message to many leads (all-or-nothing)',
       tags,
       permission: 'crm.messages.send',
+      before: [rateLimit(policies.sensitive)],
       controller: messages.sendBulk,
       response: z.object({ count: z.number(), ids: z.array(z.number()) }),
       successStatus: 201,

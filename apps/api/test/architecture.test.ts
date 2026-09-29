@@ -124,7 +124,11 @@ describe('architecture', () => {
     });
 
     it('keeps queue internals and provider SDKs out of the API domain', () => {
-      expect(sources.filter((f) => /from '(bullmq|ioredis)'/.test(read(f))).map(rel)).toEqual([]);
+      // Redis is used by the API only as the shared rate-limit store.
+      expect(sources.filter((f) => /from 'bullmq'/.test(read(f))).map(rel)).toEqual([]);
+      expect(sources.filter((f) => /from 'ioredis'/.test(read(f))).map(rel)).toEqual([
+        'platform/rate-limit.ts',
+      ]);
       const sdk = sources.filter((f) => /from '(imagekit|nodemailer)'/.test(read(f))).map(rel);
       expect(sdk).toEqual([]);
       const plivo = sources

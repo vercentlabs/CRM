@@ -34,6 +34,10 @@ import type {
   StoredFile,
   Task,
   TaskStatus,
+  WebhookEndpoint,
+  WebhookEndpointInput,
+  WebhookEndpointUpdate,
+  WebhookEndpointWithSecret,
 } from '@crm/types';
 import type {
   AssignmentInput,
@@ -325,6 +329,16 @@ export function createResources(t: V1Transport) {
       unreadCount: () => get<{ count: number }>('/notifications/unread-count'),
       markRead: (id: string) => post<{ read: true }>(`/notifications/${enc(id)}/read`),
       markAllRead: () => post<{ updated: number }>('/notifications/read-all'),
+    },
+    webhooks: {
+      list: () => get<WebhookEndpoint[]>('/webhooks'),
+      eventTypes: () => get<string[]>('/webhooks/event-types'),
+      create: (body: WebhookEndpointInput) => post<WebhookEndpointWithSecret>('/webhooks', body),
+      update: (id: string, body: WebhookEndpointUpdate) =>
+        patch<WebhookEndpoint>(`/webhooks/${enc(id)}`, body),
+      rotateSecret: (id: string) =>
+        post<WebhookEndpointWithSecret>(`/webhooks/${enc(id)}/rotate-secret`),
+      remove: (id: string) => del(`/webhooks/${enc(id)}`),
     },
     market: {
       goldRate: () => get<GoldRate>('/market/gold-rate'),

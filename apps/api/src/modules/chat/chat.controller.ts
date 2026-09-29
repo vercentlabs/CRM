@@ -35,6 +35,7 @@ export const chatMessageSchema = z.object({
   message_type: z.string(),
   attachment_url: z.string().nullable(),
   file_type: z.string().nullable(),
+  file_id: z.string().nullable().optional(),
   is_read: z.boolean(),
   created_at: z.string(),
   sender_name: z.string().nullable(),

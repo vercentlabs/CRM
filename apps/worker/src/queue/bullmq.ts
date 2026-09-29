@@ -129,6 +129,13 @@ export function createBullmqDriver(options: BullmqOptions): QueueDriver {
       if (timedOut) await Promise.all(workers.map((w) => w.close(true)));
       await Promise.all([...queues.values()].map((q) => q.close()));
     },
+    async counts() {
+      const out: Record<string, Record<string, number>> = {};
+      for (const [name, queue] of queues) {
+        out[name] = await queue.getJobCounts('waiting', 'active', 'delayed', 'failed');
+      }
+      return out;
+    },
     async ping() {
       // A cheap real command on the fail-fast producer connection, bounded in time.
       try {

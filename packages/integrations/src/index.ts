@@ -33,6 +33,12 @@ export {
   type SmsRequest,
 } from './sms.js';
 export {
+  checkPlivoWebhookUrl,
+  plivoCallbackUrls,
+  type PlivoCallbackUrls,
+  type PlivoUrlCheck,
+} from './plivo-urls.js';
+export {
   DELIVERY_HEADER,
   EVENT_ID_HEADER,
   EVENT_TYPE_HEADER,

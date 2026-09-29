@@ -19,6 +19,7 @@
     "@crm/database": "workspace:*",
     "@crm/events": "workspace:*",
     "@crm/integrations": "workspace:*",
+    "@crm/observability": "workspace:*",
     "bullmq": "^6.3.9",
     "dotenv": "^17.2.3",
     "ioredis": "^6.0.0",

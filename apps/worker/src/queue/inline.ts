@@ -109,6 +109,9 @@ export function createInlineDriver(options: { retryDelayMs?: number } = {}): Que
     async ping() {
       return !closed;
     },
+    async counts() {
+      return { inline: { waiting: pending.length, active: active ? 1 : 0, failed: failed.length } };
+    },
   };
   return driver;
 }

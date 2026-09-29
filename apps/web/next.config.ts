@@ -1,8 +1,23 @@
 import type { NextConfig } from 'next';
+import { securityHeaders } from './security-headers';
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
   poweredByHeader: false,
+  // next/image is not used: disable the /_next/image optimizer endpoint entirely
+  // (attack surface of several Next.js advisories; attachments are plain <img>).
+  images: { unoptimized: true },
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: securityHeaders({
+          apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:5000',
+          production: process.env.NODE_ENV === 'production',
+        }),
+      },
+    ];
+  },
   // Old bookmarks: lead messaging moved to /messages (it previously showed team chat).
   async redirects() {
     return [

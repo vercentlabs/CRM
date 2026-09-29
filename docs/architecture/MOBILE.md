@@ -39,7 +39,9 @@ test/                   jest-expo + React Native Testing Library suites and help
 - **Calls** start from a lead (`POST /calls`); telephony runs server-side (no Plivo in the app). The call sheet shows starting → active (timer) → ended/failed and records the outcome with `POST /calls/:id/end`.
 - **Follow-ups** are the lead call schedule; "overdue" is derived from the date. Completing one records the lead status and clears the next call; there is no "mark overdue".
 - **Locations**: check-in is manual (coordinates and address). Device GPS capture needs `expo-location` and a new native build (not added).
-- **Dates** are shown in the device locale and time zone (`lib/format.ts`); the organization `timezone` setting is not applied yet (Phase 7 item, same as web).
+- **Dates** are shown in the device locale and the **organization's time zone** (`lib/format.ts`, set by `SessionProvider` from the session; UTC fallback). The calendar grid still groups by device-local day.
+- **Network security:** `app.config.js` enables Android cleartext traffic only when `EXPO_PUBLIC_API_BASE_URL` is `http://` (local development); release builds use an https API with cleartext blocked.
+- **Not in Phase 7:** GPS check-in via `expo-location` (needs a new native build and on-device testing) and native E2E (Maestro) — both post-launch.
 
 ## Removed in Phase 5
 
